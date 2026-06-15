@@ -11,7 +11,7 @@ from firebase_admin import db
 
 init_firebase()
 
-NEW_PRODUCTS_FILE = Path(__file__).parent.parent.parent.parent / "new_products.json"
+NEW_PRODUCTS_FILE = Path(__file__).parent.parent / "new_products.json"
 
 
 def run():
