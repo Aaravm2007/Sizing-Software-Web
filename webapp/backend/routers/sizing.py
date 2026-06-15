@@ -8,9 +8,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-# ── import original sql_handler from parent directory ────────────────────────
 APP_DIR = Path(__file__).parent.parent.parent.parent
+BACKEND_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(APP_DIR))
+sys.path.insert(0, str(BACKEND_DIR))
 
 from sql_handler import (
     init_sizing_db, fetch_all_projects, fetch_all_sizings, fetch_sizing_by_sr,

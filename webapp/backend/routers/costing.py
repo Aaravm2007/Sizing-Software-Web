@@ -9,10 +9,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 APP_DIR = Path(__file__).parent.parent.parent.parent
+BACKEND_DIR = Path(__file__).parent.parent
 TEMPLATE = str(APP_DIR / "templates" / "Costing_sheet_template.xlsx")
 
 import sys as _sys
 _sys.path.insert(0, str(APP_DIR))
+_sys.path.insert(0, str(BACKEND_DIR))
 from auth import get_current_user, get_admin_user
 from user_db import get_user_costing_db
 

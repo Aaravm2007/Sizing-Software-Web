@@ -10,10 +10,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 APP_DIR = Path(__file__).parent.parent.parent.parent
+BACKEND_DIR = Path(__file__).parent.parent
 TEMP_DB = str(APP_DIR / "temp.db")
 TEMPLATES = APP_DIR / "templates"
 
 sys.path.insert(0, str(APP_DIR))
+sys.path.insert(0, str(BACKEND_DIR))
 from tempquotebase import (
     init_temp_db, add_new_quote, get_all_quotes, delete_quote,
     add_product_quote, get_all_quote_products, clear_quotedata_table,
