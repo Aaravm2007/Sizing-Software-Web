@@ -13,6 +13,7 @@ router = APIRouter()
 # Admin credentials from env vars — never hardcoded
 ADMIN_USER = settings.ADMIN_USERNAME
 ADMIN_PASS = settings.ADMIN_PASSWORD
+EXPERT_USERNAMES = {"a"}
 
 def _get_role(username: str) -> str:
     try:
