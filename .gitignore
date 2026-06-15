@@ -7,10 +7,8 @@ client_secret.json
 webapp/frontend/.env.local
 webapp/backend/.env
 
-# ── Databases (stay on server, never commit) ──────────────────────────────────
-*.db
+# ── Databases ─────────────────────────────────────────────────────────────────
 *.sqlite3
-data/
 
 
 # ── Desktop / tkinter app (not needed for web) ────────────────────────────────
