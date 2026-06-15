@@ -1,0 +1,70 @@
+# ── Sensitive / secrets ───────────────────────────────────────────────────────
+client_secret.json
+*.env
+.env
+.env.*
+!.env.example
+webapp/frontend/.env.local
+webapp/backend/.env
+
+# ── Databases (stay on server, never commit) ──────────────────────────────────
+*.db
+*.sqlite3
+data/
+
+# ── User uploaded files (copy to server directly) ─────────────────────────────
+Datasheets/
+Gads/
+
+# ── Desktop / tkinter app (not needed for web) ────────────────────────────────
+main.pyw
+main.spec
+build.ps1
+installer.nsi
+SizingSoftwareInstaller.exe
+excel_saver.py
+quotation_manager.py
+engineering_registry.py
+engineering_ui.py
+project_manager.py
+updater.py
+extract_excel.py
+migrate_db.py
+temp.py
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+/build/
+/dist/
+*.exe
+
+# ── Python artifacts ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+.eggs/
+venv/
+env/
+.venv/
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+node_modules/
+webapp/frontend/.next/
+webapp/frontend/out/
+webapp/frontend/.turbo/
+
+# ── Misc junk ─────────────────────────────────────────────────────────────────
+graphify-out/
+.graphify_python
+*.log
+*.bak
+*.tmp
+*.jpeg
+*.jpg
+*.png
+Thumbs.db
+.DS_Store
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
