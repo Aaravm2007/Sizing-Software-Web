@@ -12,9 +12,6 @@ webapp/backend/.env
 *.sqlite3
 data/
 
-# ── User uploaded files (copy to server directly) ─────────────────────────────
-Datasheets/
-Gads/
 
 # ── Desktop / tkinter app (not needed for web) ────────────────────────────────
 main.pyw
