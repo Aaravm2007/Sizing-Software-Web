@@ -370,6 +370,9 @@ class AddFromWizardReq(BaseModel):
     price_option: str = "B"
     quantity: int = 1
     custom_pct: float = 0.0
+    actual_load_kva: float = 0
+    ups_rating_kva: float = 0
+    calculated_load_kw: float = 0
 
 @router.post("/quotes/{code}/add-from-wizard", status_code=201)
 def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_user), scope: str = Query("regular")):
@@ -393,10 +396,21 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
     all_items = get_all_quote_products(code, tdb)
     sol_no = sum(1 for i in all_items if str(_row_to_dict(i)["modular_rack"]) == "-") + 1
 
+    if body.actual_load_kva > 0:
+        ups_rating_val = str(body.actual_load_kva)
+    elif body.ups_rating_kva > 0:
+        ups_rating_val = str(body.ups_rating_kva)
+    elif body.calculated_load_kw > 0:
+        ups_rating_val = str(body.calculated_load_kw)
+    else:
+        ups_rating_val = "-"
+
+    calc_load_val = str(body.calculated_load_kw) if body.calculated_load_kw > 0 else "-"
+
     add_product_quote(
         code, q_code, q_fmt, q_date, q_provider, q_customer,
-        sr_no, sol_no, "-",
-        str(backup_time), str(body.kw_calculation),
+        sr_no, sol_no, ups_rating_val,
+        str(backup_time), calc_load_val,
         str(body.cell_type), str(body.centre_tap), str(body.partcode),
         str(backup_time), body.quantity, quote_price, "-", tdb,
     )

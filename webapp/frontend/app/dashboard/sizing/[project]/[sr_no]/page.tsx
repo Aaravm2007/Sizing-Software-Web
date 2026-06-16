@@ -14,6 +14,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 const DC_VOLTAGES = [12, 24, 36, 48, 72, 96, 120, 144, 192, 240, 336, 360, 384, 408, 480, 512, 528, 576];
 const CHEMISTRIES = ["LFP"];
 const QUOTE_FORMATS = ["High voltage","Low voltage","Extended Warranty High Voltage","Extended Warranty Low Voltage","Low & High Voltage Export"];
+const PRICE_OPTIONS = [
+  { label: "A (Cost)",    value: "A",   mult: 1.00 },
+  { label: "A+5% (B-5)", value: "B-5", mult: 1.05 },
+  { label: "A+10% (B)",  value: "B",   mult: 1.10 },
+  { label: "A+15% (B+5)",value: "B+5", mult: 1.15 },
+  { label: "A+20% (C)",  value: "C",   mult: 1.20 },
+  { label: "A+25% (C+5)",value: "C+5", mult: 1.25 },
+];
 
 interface CostingResult {
   battery_pack: string; duration: string;
@@ -297,6 +305,9 @@ export default function SizingFormPage() {
   const [nqFormat, setNqFormat] = useState(QUOTE_FORMATS[0]);
   const [addingToQuote, setAddingToQuote] = useState(false);
   const [selectedQuoteCode, setSelectedQuoteCode] = useState<string | null>(null);
+  const [nqPriceOption, setNqPriceOption] = useState("B");
+  const [nqCustomPct, setNqCustomPct] = useState("30");
+  const [nqQuantity, setNqQuantity] = useState("1");
 
   const { data: existingQuotes = [] } = useQuery<{code:string;date:string;customer_name:string}[]>({
     queryKey: ["quotes"],
@@ -353,6 +364,9 @@ export default function SizingFormPage() {
     setNqFormat(QUOTE_FORMATS[0]);
     setSelectedQuoteCode(null);
     setQuoteMode("new");
+    setNqPriceOption("B");
+    setNqCustomPct("30");
+    setNqQuantity("1");
     setAddToQuoteOpen(true);
   };
 
@@ -380,8 +394,12 @@ export default function SizingFormPage() {
         centre_tap: selectedCosting.centre_tap,
         partcode: selectedCosting.partcode,
         total_cost: selectedCosting.total_cost,
-        price_option: "A",
-        quantity: 1,
+        price_option: nqPriceOption,
+        custom_pct: nqPriceOption === "custom" ? parseFloat(nqCustomPct) || 0 : 0,
+        quantity: parseInt(nqQuantity) || 1,
+        actual_load_kva: parseFloat(form.actual_load_kva) || 0,
+        ups_rating_kva: parseFloat(form.ups_rating_kva) || 0,
+        calculated_load_kw: parseFloat(form.calculated_load_kw) || 0,
       });
       localStorage.setItem(`quote_link_${code}`, JSON.stringify({
         sizing_project: projectName,
@@ -707,6 +725,51 @@ export default function SizingFormPage() {
               )
             )}
           </div>
+
+          {/* ── Price & Quantity ── */}
+          <div className="border-t pt-4 flex flex-col gap-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Price & Quantity</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {PRICE_OPTIONS.map((opt) => (
+                <button key={opt.value}
+                  onClick={() => setNqPriceOption(opt.value)}
+                  className={`text-xs rounded border px-2 py-1.5 transition-colors ${nqPriceOption === opt.value ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted border-border"}`}>
+                  {opt.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setNqPriceOption("custom")}
+                className={`col-span-3 text-xs rounded border px-2 py-1.5 transition-colors ${nqPriceOption === "custom" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted border-border"}`}>
+                Custom %
+              </button>
+            </div>
+            {nqPriceOption === "custom" && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">A +</span>
+                <input type="number" min="0" max="200" step="0.5"
+                  value={nqCustomPct}
+                  onChange={(e) => setNqCustomPct(e.target.value)}
+                  className="h-8 w-20 rounded-md border px-2 text-sm bg-background" />
+                <span className="text-xs text-muted-foreground">%</span>
+              </div>
+            )}
+            {selectedCosting && (
+              <p className="text-xs text-muted-foreground">
+                Price: ₹{(
+                  Number(selectedCosting.total_cost) *
+                  (nqPriceOption === "custom"
+                    ? 1 + (parseFloat(nqCustomPct) || 0) / 100
+                    : (PRICE_OPTIONS.find(o => o.value === nqPriceOption)?.mult ?? 1.1))
+                ).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </p>
+            )}
+            <QRow label="Qty">
+              <input type="number" min="1" value={nqQuantity}
+                onChange={(e) => setNqQuantity(e.target.value)}
+                className="h-8 w-24 rounded-md border px-2 text-sm bg-background" />
+            </QRow>
+          </div>
+
           <DialogFooter className="gap-2">
             <Button variant="ghost" onClick={() => setAddToQuoteOpen(false)}>Cancel</Button>
             <Button onClick={handleAddToQuote}
