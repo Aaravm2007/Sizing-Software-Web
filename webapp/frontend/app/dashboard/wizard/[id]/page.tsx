@@ -292,17 +292,26 @@ export default function WizardComparePage() {
     const col = cols[pendingCol];
     const row = col.costing_rows[resultIdx[pendingCol] ?? 0];
     try {
+      const aKva = parseFloat(col.actual_load_kva) || 0;
+      const uKva = parseFloat(col.ups_rating_kva) || 0;
+      const cKw  = parseFloat(col.calculated_load_kw) || 0;
+      const ups_rating = aKva > 0 ? String(aKva) : uKva > 0 ? String(uKva) : cKw > 0 ? String(cKw) : "-";
+      const calc_load  = cKw > 0 ? String(cKw) : "-";
+
       const res = await api.post(`/api/quotation/quotes/${quoteCode}/add-from-wizard?scope=wizard`, {
-        battery_config:  col.offered_battery_config,
-        duration:        row?.duration || col.backup_requirement_min,
-        kw_calculation:  parseFloat(col.calculated_load_kw) || 0,
-        cell_type:       row?.cell_type || col.cell_type,
-        centre_tap:      row?.centre_tap || col.centre_tap,
-        partcode:        row?.partcode || "",
-        total_cost:      parseFloat(row?.total_cost) || 0,
-        price_option:    priceOption,
-        quantity:        parseInt(quantity) || 1,
-        custom_pct:      parseFloat(customPct) || 0,
+        battery_config:    col.offered_battery_config,
+        duration:          row?.duration || col.backup_requirement_min,
+        kw_calculation:    cKw,
+        cell_type:         row?.cell_type || col.cell_type,
+        centre_tap:        row?.centre_tap || col.centre_tap,
+        partcode:          row?.partcode || "",
+        total_cost:        parseFloat(row?.total_cost) || 0,
+        price_option:      priceOption,
+        quantity:          parseInt(quantity) || 1,
+        custom_pct:        parseFloat(customPct) || 0,
+        actual_load_kva:   aKva,
+        ups_rating_kva:    uKva,
+        calculated_load_kw: cKw,
       });
       const qi = {
         sr_no:          res.data.sr_no,
@@ -315,6 +324,8 @@ export default function WizardComparePage() {
         cell_type:      row?.cell_type || col.cell_type,
         partcode:       row?.partcode || "",
         brand:          row?.brand || "",
+        ups_rating,
+        calc_load,
       };
       setQuoteItems(prev => { const a = [...prev]; a[pendingCol!] = qi; return a; });
       toast.success(`Sizing ${pendingCol + 1} added to quote ${quoteCode} (Sr ${res.data.sr_no})`);
@@ -984,7 +995,7 @@ export default function WizardComparePage() {
                       <div className="font-bold text-lg text-center">{qi.sr_no}</div>
                       <div className="flex flex-col gap-1">
                         <span className="text-xs text-muted-foreground uppercase font-medium">System</span>
-                        <span className="whitespace-pre-line">{`Sizing ${ci + 1}\n${qi.battery_config}\nBackup: ${qi.backup_time} min\n${qi.centre_tap} | ${qi.cell_type}`}</span>
+                        <span className="whitespace-pre-line">{`${qi.ups_rating}KVA : ${qi.backup_time}Min Backup\n(Load: ${qi.calc_load}kW)\n(Cell Type: ${qi.cell_type})\n(${qi.centre_tap})`}</span>
                       </div>
                       <div className="flex flex-col gap-1">
                         <span className="text-xs text-muted-foreground uppercase font-medium">Solution</span>
