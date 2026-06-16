@@ -114,7 +114,7 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
     meta = next((q for q in quotes if q[0] == quote_code), None)
     if not meta:
         raise ValueError("Quote not found")
-    code, date, customer, provider, fmt_fname = meta
+    code, date, customer, provider, fmt_fname, *_ = meta
     template_path = str(TEMPLATES / fmt_fname)
     items = get_all_quote_products(quote_code, db_path)
 
