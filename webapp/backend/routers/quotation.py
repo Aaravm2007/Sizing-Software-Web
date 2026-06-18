@@ -214,7 +214,9 @@ def next_code(user=Depends(get_current_user), scope: str = Query("regular")):
         from basefunctions import get_new_quote_code
         return {"code": get_new_quote_code()}
     except Exception:
-        return {"code": str(len(get_all_quotes(tdb)) + 1)}
+        rows = get_all_quotes(tdb)
+        numeric = [int(r[0]) for r in rows if str(r[0]).isdigit()]
+        return {"code": str(max(numeric) + 1) if numeric else "1"}
 
 
 @router.get("/quotes")

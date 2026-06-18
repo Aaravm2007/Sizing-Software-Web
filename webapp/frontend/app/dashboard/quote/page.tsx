@@ -100,7 +100,8 @@ export default function QuotePage() {
   });
 
   const openNew = () => {
-    setNCode(nextCode?.code ?? String(quotes.length + 1));
+    const numeric = quotes.map(q => parseInt(q.code)).filter(n => !isNaN(n));
+    setNCode(nextCode?.code ?? (numeric.length ? String(Math.max(...numeric) + 1) : "1"));
     setNDate(new Date().toLocaleDateString("en-GB"));
     setNCustomer("");
     setNProvider("");
