@@ -293,10 +293,11 @@ export default function WizardComparePage() {
     const row = col.costing_rows[resultIdx[pendingCol] ?? 0];
     try {
       const aKva = parseFloat(col.actual_load_kva) || 0;
+      const aKw  = parseFloat(col.actual_load_kw) || 0;
       const uKva = parseFloat(col.ups_rating_kva) || 0;
       const cKw  = parseFloat(col.calculated_load_kw) || 0;
-      const ups_rating = aKva > 0 ? String(aKva) : uKva > 0 ? String(uKva) : cKw > 0 ? String(cKw) : "-";
-      const calc_load  = cKw > 0 ? String(cKw) : "-";
+      const ups_rating = uKva > 0 ? String(uKva) : "-";
+      const calc_load  = aKva > 0 ? String(aKva) : aKw > 0 ? String(aKw) : "";
 
       const res = await api.post(`/api/quotation/quotes/${quoteCode}/add-from-wizard?scope=wizard`, {
         battery_config:    col.offered_battery_config,
@@ -310,6 +311,7 @@ export default function WizardComparePage() {
         quantity:          parseInt(quantity) || 1,
         custom_pct:        parseFloat(customPct) || 0,
         actual_load_kva:   aKva,
+        actual_load_kw:    aKw,
         ups_rating_kva:    uKva,
         calculated_load_kw: cKw,
       });
@@ -995,7 +997,7 @@ export default function WizardComparePage() {
                       <div className="font-bold text-lg text-center">{qi.sr_no}</div>
                       <div className="flex flex-col gap-1">
                         <span className="text-xs text-muted-foreground uppercase font-medium">System</span>
-                        <span className="whitespace-pre-line">{`${qi.ups_rating}KVA : ${qi.backup_time}Min Backup\n(Load: ${qi.calc_load}kW)\n(Cell Type: ${qi.cell_type})\n(${qi.centre_tap})`}</span>
+                        <span className="whitespace-pre-line">{`${qi.ups_rating}KVA : ${qi.backup_time}Min Backup${qi.calc_load ? `\n(Load: ${qi.calc_load}kW)` : ""}\n(Cell Type: ${qi.cell_type})\n(${qi.centre_tap})`}</span>
                       </div>
                       <div className="flex flex-col gap-1">
                         <span className="text-xs text-muted-foreground uppercase font-medium">Solution</span>

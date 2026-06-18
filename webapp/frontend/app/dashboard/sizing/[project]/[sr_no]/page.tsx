@@ -398,6 +398,7 @@ export default function SizingFormPage() {
         custom_pct: nqPriceOption === "custom" ? parseFloat(nqCustomPct) || 0 : 0,
         quantity: parseInt(nqQuantity) || 1,
         actual_load_kva: parseFloat(form.actual_load_kva) || 0,
+        actual_load_kw: parseFloat(form.actual_load_kw) || 0,
         ups_rating_kva: parseFloat(form.ups_rating_kva) || 0,
         calculated_load_kw: parseFloat(form.calculated_load_kw) || 0,
       });

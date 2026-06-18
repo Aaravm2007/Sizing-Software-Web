@@ -150,7 +150,8 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
 
         if d["modular_rack"] and d["modular_rack"] != "-":
             system_text = ""
-            solution_text = f"Modular Battery Rack ({d['modular_rack']})"
+            rack_key = d["modular_rack"]
+            solution_text = f"Modular Battery Rack ({rack_key})" if rack_key.startswith("W=") else rack_key
         else:
             sol_no += 1
             bt = d["backup_time"]
@@ -158,9 +159,10 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
                 bt_floor = math.floor(float(bt)) if bt and bt != "-" else 0
             except Exception:
                 bt_floor = 0
+            load_line = f"\n(Load: {d['calc_load']}kW)" if d.get("calc_load") else ""
             system_text = d.get("system_text") or (
-                f"{d['ups_rating']}KVA : {d['backup_requirement']}Min Backup\n"
-                f"(Load: {d['calc_load']}kW)\n"
+                f"{d['ups_rating']}KVA : {d['backup_requirement']}Min Backup"
+                f"{load_line}\n"
                 f"(Cell Type:{d['celltype']})\n"
                 f"({d['centre_tapping']})"
             )
@@ -335,7 +337,6 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
     except Exception:
         backup_time = 0.0
 
-    kw_val = row[idx("KW calculation")] or 0
     celltype = row[idx("Cylindrical/ Prismatic")] or "-"
     centre_tapping = row[idx("Centre tap/non centre tap")] or "-"
     batterypartcode = row[idx("Battery Partcode")] or "-"
@@ -353,7 +354,7 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
 
     add_product_quote(
         code, q_code, q_fmt, q_date, q_provider, q_customer,
-        sr_no, sol_no, "-", str(backup_time), str(kw_val),
+        sr_no, sol_no, "-", str(backup_time), "-",
         str(celltype), str(centre_tapping), str(batterypartcode),
         str(backup_time), body.quantity, quote_price, "-", tdb,
     )
@@ -374,6 +375,7 @@ class AddFromWizardReq(BaseModel):
     quantity: int = 1
     custom_pct: float = 0.0
     actual_load_kva: float = 0
+    actual_load_kw: float = 0
     ups_rating_kva: float = 0
     calculated_load_kw: float = 0
 
@@ -399,16 +401,14 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
     all_items = get_all_quote_products(code, tdb)
     sol_no = sum(1 for i in all_items if str(_row_to_dict(i)["modular_rack"]) == "-") + 1
 
-    if body.actual_load_kva > 0:
-        ups_rating_val = str(body.actual_load_kva)
-    elif body.ups_rating_kva > 0:
-        ups_rating_val = str(body.ups_rating_kva)
-    elif body.calculated_load_kw > 0:
-        ups_rating_val = str(body.calculated_load_kw)
-    else:
-        ups_rating_val = "-"
+    ups_rating_val = str(body.ups_rating_kva) if body.ups_rating_kva > 0 else "-"
 
-    calc_load_val = str(body.calculated_load_kw) if body.calculated_load_kw > 0 else "-"
+    if body.actual_load_kva > 0:
+        calc_load_val = str(body.actual_load_kva)
+    elif body.actual_load_kw > 0:
+        calc_load_val = str(body.actual_load_kw)
+    else:
+        calc_load_val = ""
 
     add_product_quote(
         code, q_code, q_fmt, q_date, q_provider, q_customer,

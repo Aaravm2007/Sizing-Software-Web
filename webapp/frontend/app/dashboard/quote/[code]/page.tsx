@@ -211,8 +211,10 @@ export default function QuoteEditorPage() {
 
   const sensors = useSensors(useSensor(PointerSensor));
 
-  const composeSystem = (item: QuoteItem) =>
-    `${item.ups_rating}KVA : ${item.backup_requirement}Min Backup\n(Load: ${item.calc_load}kW)\n(Cell Type:${item.celltype})\n(${item.centre_tapping})`;
+  const composeSystem = (item: QuoteItem) => {
+    const loadLine = item.calc_load ? `\n(Load: ${item.calc_load}kW)` : "";
+    return `${item.ups_rating}KVA : ${item.backup_requirement}Min Backup${loadLine}\n(Cell Type:${item.celltype})\n(${item.centre_tapping})`;
+  };
 
   const composeSolution = (item: QuoteItem, sn: number | null) =>
     `Solution${sn ?? "?"}: Lithium Battery Pack\n(${item.batterypartcode}) with\nApprox Backup: ${item.backup_time}Mins At BOL\nWith Cabinet and inbuilt BMS`;
@@ -451,7 +453,9 @@ export default function QuoteEditorPage() {
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground uppercase font-medium">Solution</span>
                 {isModular ? (
-                  <span>Modular Battery Rack ({item.modular_rack})</span>
+                  <span>{MODULAR_RACKS.some(r => r.key === item.modular_rack)
+                    ? `Modular Battery Rack (${item.modular_rack})`
+                    : item.modular_rack}</span>
                 ) : (
                   <span className="whitespace-pre-line">
                     {item.solution_text || composeSolution(item, sn)}
