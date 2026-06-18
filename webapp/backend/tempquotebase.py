@@ -65,8 +65,15 @@ def create_quote_table(code, db_path=None):
                "backup_time" int,
                "quantity" int,
                "quote_price" int,
-               "modular_rack" text
+               "modular_rack" text,
+               "system_text" text,
+               "solution_text" text
               )""")
+    for col in ["system_text", "solution_text"]:
+        try:
+            c.execute(f'ALTER TABLE {table_name} ADD COLUMN "{col}" text')
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 
@@ -165,7 +172,7 @@ def get_all_quote_products(quote_code, db_path=None):
     c = conn.cursor()
     table_name = get_items_table_name(quote_code)
     try:
-        c.execute(f'SELECT * FROM {table_name}')
+        c.execute(f'SELECT * FROM {table_name} ORDER BY sr_no')
         rows = c.fetchall()
     except Exception as e:
         print(f"Error fetching products for {quote_code}: {e}")

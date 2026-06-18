@@ -101,8 +101,11 @@ def _row_to_dict(row: tuple) -> dict:
     keys = ["code","format","date","solution_provider","customer_name",
             "sr_no","sol_no","ups_rating","backup_requirement","calc_load",
             "celltype","centre_tapping","batterypartcode","backup_time",
-            "quantity","quote_price","modular_rack"]
-    return dict(zip(keys, row))
+            "quantity","quote_price","modular_rack","system_text","solution_text"]
+    d = dict(zip(keys, row))
+    d.setdefault("system_text", None)
+    d.setdefault("solution_text", None)
+    return d
 
 
 def _generate_docx(quote_code: str, db_path: str = None) -> str:
@@ -155,13 +158,13 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
                 bt_floor = math.floor(float(bt)) if bt and bt != "-" else 0
             except Exception:
                 bt_floor = 0
-            system_text = (
+            system_text = d.get("system_text") or (
                 f"{d['ups_rating']}KVA : {d['backup_requirement']}Min Backup\n"
                 f"(Load: {d['calc_load']}kW)\n"
                 f"(Cell Type:{d['celltype']})\n"
                 f"({d['centre_tapping']})"
             )
-            solution_text = (
+            solution_text = d.get("solution_text") or (
                 f"Solution{sol_no}: Lithium Battery Pack\n"
                 f"({d['batterypartcode']}) with\n"
                 f"Approximate Backup Time: {bt_floor}Mins At BOL\n"
@@ -507,6 +510,74 @@ def download_from_firebase(code: str, user=Depends(get_current_user)):
             item.get("quote_price", 0), item.get("modular_rack", "-"), tdb,
         )
     return {"code": q_code}
+
+
+# ── Update item ───────────────────────────────────────────────────────────────
+
+class UpdateItemReq(BaseModel):
+    ups_rating: Optional[str] = None
+    backup_requirement: Optional[str] = None
+    calc_load: Optional[str] = None
+    celltype: Optional[str] = None
+    centre_tapping: Optional[str] = None
+    batterypartcode: Optional[str] = None
+    backup_time: Optional[str] = None
+    quote_price: Optional[float] = None
+    system_text: Optional[str] = None
+    solution_text: Optional[str] = None
+
+@router.patch("/quotes/{code}/items/{sr_no}")
+def update_item(code: str, sr_no: int, body: UpdateItemReq, user=Depends(get_current_user), scope: str = Query("regular")):
+    from tempquotebase import get_items_table_name, get_db_connection
+    tdb = _tdb(user["username"], scope)
+    table = get_items_table_name(code)
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        return {"detail": "nothing to update"}
+    set_clause = ", ".join(f'"{k}" = ?' for k in fields)
+    values = list(fields.values()) + [sr_no]
+    conn = get_db_connection(tdb)
+    try:
+        for col in ["system_text", "solution_text"]:
+            try:
+                conn.execute(f'ALTER TABLE "{table}" ADD COLUMN "{col}" text')
+            except Exception:
+                pass
+        conn.execute(f'UPDATE "{table}" SET {set_clause} WHERE sr_no = ?', values)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, str(e))
+    finally:
+        conn.close()
+    return {"detail": "updated"}
+
+
+# ── Reorder ───────────────────────────────────────────────────────────────────
+
+class ReorderReq(BaseModel):
+    sr_nos: list[int]
+
+@router.put("/quotes/{code}/reorder")
+def reorder_items(code: str, body: ReorderReq, user=Depends(get_current_user), scope: str = Query("regular")):
+    import sqlite3
+    from tempquotebase import get_items_table_name, get_db_connection
+    tdb = _tdb(user["username"], scope)
+    table = get_items_table_name(code)
+    conn = get_db_connection(tdb)
+    c = conn.cursor()
+    try:
+        for i, sr in enumerate(body.sr_nos):
+            c.execute(f'UPDATE "{table}" SET sr_no = ? WHERE sr_no = ?', (-(i + 1), sr))
+        for i in range(len(body.sr_nos)):
+            c.execute(f'UPDATE "{table}" SET sr_no = ? WHERE sr_no = ?', (i + 1, -(i + 1)))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(500, str(e))
+    finally:
+        conn.close()
+    return {"detail": "reordered"}
 
 
 # ── Export ────────────────────────────────────────────────────────────────────

@@ -15,6 +15,10 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical, Pencil } from "lucide-react";
 
 interface QuoteItem {
   code: string;
@@ -34,6 +38,8 @@ interface QuoteItem {
   quantity: number;
   quote_price: number;
   modular_rack: string;
+  system_text?: string | null;
+  solution_text?: string | null;
 }
 
 interface CostingRow {
@@ -70,6 +76,15 @@ const MODULAR_RACKS = [
 const MULT: Record<string, number> = {
   "A": 1.0, "B-5": 1.05, "B": 1.10, "B+5": 1.15, "C": 1.20, "C+5": 1.25,
 };
+
+function SortableItem({ id, children }: { id: number; children: (dragHandleProps: React.HTMLAttributes<HTMLElement>) => React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}>
+      {children({ ...attributes, ...listeners })}
+    </div>
+  );
+}
 
 export default function QuoteEditorPage() {
   const { code: rawCode } = useParams();
@@ -176,12 +191,81 @@ export default function QuoteEditorPage() {
   const [customCostPrice, setCustomCostPrice] = useState("");
   const [customCostQty, setCustomCostQty] = useState("1");
 
+  // edit item
+  const [editOpen, setEditOpen] = useState(false);
+  const [editItem, setEditItem] = useState<QuoteItem | null>(null);
+  const [editFields, setEditFields] = useState<Record<string,string>>({});
+
+  // rounding
+  const [roundingItem, setRoundingItem] = useState<number | null>(null);
+
   const qKey = ["quote-items", code];
 
   const { data: items = [], isLoading } = useQuery<QuoteItem[]>({
     queryKey: qKey,
     queryFn: () => api.get(`/api/quotation/quotes/${encodeURIComponent(code)}/items`).then((r) => r.data),
   });
+
+  const [localItems, setLocalItems] = useState<QuoteItem[]>([]);
+  useEffect(() => { setLocalItems(items); }, [items]);
+
+  const sensors = useSensors(useSensor(PointerSensor));
+
+  const composeSystem = (item: QuoteItem) =>
+    `${item.ups_rating}KVA : ${item.backup_requirement}Min Backup\n(Load: ${item.calc_load}kW)\n(Cell Type:${item.celltype})\n(${item.centre_tapping})`;
+
+  const composeSolution = (item: QuoteItem, sn: number | null) =>
+    `Solution${sn ?? "?"}: Lithium Battery Pack\n(${item.batterypartcode}) with\nApprox Backup: ${item.backup_time}Mins At BOL\nWith Cabinet and inbuilt BMS`;
+
+  const openEdit = (item: QuoteItem, sn: number | null) => {
+    setEditItem(item);
+    setEditFields({
+      system_text: item.system_text || composeSystem(item),
+      solution_text: item.solution_text || composeSolution(item, sn),
+    });
+    setEditOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editItem) return;
+    try {
+      await api.patch(`/api/quotation/quotes/${encodeURIComponent(code)}/items/${editItem.sr_no}`, editFields);
+      qc.invalidateQueries({ queryKey: qKey });
+      setEditOpen(false);
+      toast.success("Updated");
+    } catch (e: any) {
+      toast.error(apiErr(e, "Update failed"));
+    }
+  };
+
+  const handleRound = async (sr_no: number, price: number, mode: "ceil" | "round" | "floor") => {
+    const rounded = mode === "ceil" ? Math.ceil(price) : mode === "floor" ? Math.floor(price) : Math.round(price);
+    try {
+      await api.patch(`/api/quotation/quotes/${encodeURIComponent(code)}/items/${sr_no}`, { quote_price: rounded });
+      qc.invalidateQueries({ queryKey: qKey });
+    } catch (e: any) {
+      toast.error(apiErr(e, "Round failed"));
+    }
+    setRoundingItem(null);
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = localItems.findIndex(i => i.sr_no === active.id);
+    const newIdx = localItems.findIndex(i => i.sr_no === over.id);
+    const reordered = arrayMove(localItems, oldIdx, newIdx).map((item, i) => ({ ...item, sr_no: i + 1 }));
+    setLocalItems(reordered);
+    try {
+      await api.put(`/api/quotation/quotes/${encodeURIComponent(code)}/reorder`, {
+        sr_nos: reordered.map(i => i.sr_no),
+      });
+      qc.invalidateQueries({ queryKey: qKey });
+    } catch (e: any) {
+      toast.error(apiErr(e, "Reorder failed"));
+      setLocalItems(items);
+    }
+  };
 
   const { data: costingRows = [] } = useQuery<CostingRow[]>({
     queryKey: ["costing-tree"],
@@ -336,18 +420,23 @@ export default function QuoteEditorPage() {
       {/* Line items */}
       <div className="flex-1 overflow-auto flex flex-col gap-3">
         {isLoading && <p className="text-muted-foreground text-sm">Loading…</p>}
-        {!isLoading && items.length === 0 && (
+        {!isLoading && localItems.length === 0 && (
           <p className="text-muted-foreground text-sm">No items yet. Add from Costing or add a Modular Rack.</p>
         )}
-        {items.map((item, idx) => {
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={localItems.map(i => i.sr_no)} strategy={verticalListSortingStrategy}>
+        {localItems.map((item, idx) => {
           const isModular = item.modular_rack && item.modular_rack !== "-";
           const price = parseFloat(String(item.quote_price)) || 0;
           const total = (parseInt(String(item.quantity)) || 0) * price;
           const sn = isModular ? null : solCount(idx);
 
           return (
-            <div key={item.sr_no}
-              className="border rounded-md p-4 grid grid-cols-[40px_1fr_1fr_120px_180px_180px_36px] gap-3 text-sm items-start">
+            <SortableItem key={item.sr_no} id={item.sr_no}>
+            {(dragHandleProps) => (
+            <div
+              className="border rounded-md p-4 grid grid-cols-[20px_40px_1fr_1fr_120px_180px_180px_56px] gap-3 text-sm items-start">
+              <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab active:cursor-grabbing mt-1" {...dragHandleProps} />
               <div className="font-bold text-lg text-center">{item.sr_no}</div>
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground uppercase font-medium">System</span>
@@ -355,7 +444,7 @@ export default function QuoteEditorPage() {
                   <span className="text-muted-foreground italic">—</span>
                 ) : (
                   <span className="whitespace-pre-line">
-                    {`${item.ups_rating}KVA : ${item.backup_requirement}Min Backup\n(Load: ${item.calc_load}kW)\n(Cell Type:${item.celltype})\n(${item.centre_tapping})`}
+                    {item.system_text || composeSystem(item)}
                   </span>
                 )}
               </div>
@@ -365,7 +454,7 @@ export default function QuoteEditorPage() {
                   <span>Modular Battery Rack ({item.modular_rack})</span>
                 ) : (
                   <span className="whitespace-pre-line">
-                    {`Solution${sn}: Lithium Battery Pack\n(${item.batterypartcode}) with\nApprox Backup: ${item.backup_time}Mins At BOL\nWith Cabinet and inbuilt BMS`}
+                    {item.solution_text || composeSolution(item, sn)}
                   </span>
                 )}
               </div>
@@ -376,20 +465,41 @@ export default function QuoteEditorPage() {
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground uppercase font-medium">Unit Price</span>
                 <span>Rs. {price.toLocaleString("en-IN")}/- +GST</span>
+                {roundingItem === item.sr_no ? (
+                  <div className="flex gap-1 mt-1">
+                    <button onClick={() => handleRound(item.sr_no, price, "ceil")} className="text-xs border rounded px-1.5 py-0.5 hover:bg-muted" title="Round up">⌈ Up</button>
+                    <button onClick={() => handleRound(item.sr_no, price, "round")} className="text-xs border rounded px-1.5 py-0.5 hover:bg-muted" title="Round nearest">~ Near</button>
+                    <button onClick={() => handleRound(item.sr_no, price, "floor")} className="text-xs border rounded px-1.5 py-0.5 hover:bg-muted" title="Round down">⌊ Down</button>
+                    <button onClick={() => setRoundingItem(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setRoundingItem(item.sr_no)} className="text-xs text-muted-foreground hover:text-foreground mt-1 text-left">⌈ Round</button>
+                )}
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground uppercase font-medium">Total</span>
                 <span>Rs. {total.toLocaleString("en-IN")}/- +GST</span>
               </div>
-              <button
-                className="text-destructive hover:text-destructive/80 disabled:opacity-40 mt-1"
-                onClick={() => deleteMut.mutate(item.sr_no)}
-                disabled={deleteMut.isPending}
-                title="Delete row"
-              >✕</button>
+              <div className="flex flex-col gap-1 mt-1">
+                {!isModular && (
+                  <button className="text-muted-foreground hover:text-foreground" onClick={() => openEdit(item, sn)} title="Edit">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <button
+                  className="text-destructive hover:text-destructive/80 disabled:opacity-40"
+                  onClick={() => deleteMut.mutate(item.sr_no)}
+                  disabled={deleteMut.isPending}
+                  title="Delete row"
+                >✕</button>
+              </div>
             </div>
+            )}
+            </SortableItem>
           );
         })}
+          </SortableContext>
+        </DndContext>
       </div>
 
       {groupDialogItem && (
@@ -398,6 +508,37 @@ export default function QuoteEditorPage() {
       {approvalItem && (
         <SubmitApprovalDialog open={!!approvalItem} item={approvalItem} onClose={() => setApprovalItem(null)} />
       )}
+
+      {/* Edit Item Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>Edit Item</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</Label>
+              <textarea
+                rows={4}
+                className="w-full rounded-md border px-3 py-2 text-sm bg-background resize-y"
+                value={editFields.system_text ?? ""}
+                onChange={e => setEditFields(f => ({ ...f, system_text: e.target.value }))}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Solution</Label>
+              <textarea
+                rows={4}
+                className="w-full rounded-md border px-3 py-2 text-sm bg-background resize-y"
+                value={editFields.solution_text ?? ""}
+                onChange={e => setEditFields(f => ({ ...f, solution_text: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={handleEditSave}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add from Costing Dialog */}
       <Dialog open={addCostingOpen} onOpenChange={setAddCostingOpen}>
