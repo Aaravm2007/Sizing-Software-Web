@@ -331,12 +331,6 @@ export default function QuoteEditorPage() {
     onError: (e: any) => toast.error(apiErr(e, "Failed")),
   });
 
-  const saveFirebaseMut = useMutation({
-    mutationFn: () => api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/save-to-firebase`),
-    onSuccess: () => toast.success("Saved to Firebase"),
-    onError: (e: any) => toast.error(apiErr(e, "Save failed")),
-  });
-
   const handleExport = (fmt: "word" | "pdf") => {
     const ext = fmt === "word" ? "docx" : "pdf";
     const mime = fmt === "word"
@@ -351,6 +345,7 @@ export default function QuoteEditorPage() {
         a.click();
         window.URL.revokeObjectURL(url);
         setExportOpen(false);
+        api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/save-to-firebase`).catch(() => {});
         // auto-save record on export
         const first = items[0];
         if (first) {
@@ -414,9 +409,6 @@ export default function QuoteEditorPage() {
           Add Custom Cost
         </Button>
         <Button variant="outline" onClick={() => setExportOpen(true)}>Export</Button>
-        <Button variant="secondary" onClick={() => saveFirebaseMut.mutate()} disabled={saveFirebaseMut.isPending}>
-          Save to Firebase
-        </Button>
       </div>
 
       {/* Line items */}
