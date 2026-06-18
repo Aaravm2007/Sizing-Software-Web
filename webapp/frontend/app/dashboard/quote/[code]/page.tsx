@@ -430,7 +430,9 @@ export default function QuoteEditorPage() {
             {(dragHandleProps) => (
             <div
               className="border rounded-md p-4 grid grid-cols-[20px_40px_1fr_1fr_120px_180px_180px_56px] gap-3 text-sm items-start">
-              <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab active:cursor-grabbing mt-1" {...dragHandleProps} />
+              <span className="mt-1 flex items-start" {...dragHandleProps}>
+                <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab active:cursor-grabbing" />
+              </span>
               <div className="font-bold text-lg text-center">{item.sr_no}</div>
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground uppercase font-medium">System</span>
