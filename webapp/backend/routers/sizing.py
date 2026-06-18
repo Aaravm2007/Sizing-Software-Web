@@ -251,7 +251,7 @@ def dup_sizing(name: str, sr_no: int, user=Depends(get_current_user)):
 
 SIZING_CELL_MAP = {
     "Customer Name": "C4", "Solution Provider": "C5",
-    "Date": "I3",
+    "Date": "H3",
     "UPS Make": "A8", "UPS Model": "B8",
     "UPS Rating (KVA)": "C8", "Actual Load (KVA)": "D8",
     "Power Factor": "E8", "Inverter Efficiency": "F8",
@@ -279,7 +279,7 @@ def _sizing_row_to_data(row) -> dict:
     dod        = row[14] or 0
     derating   = row[15] or 0
     return {
-        "Date": _dt.now().strftime("%d/%m/%Y"),
+        "Date": "Date: " + _dt.now().strftime("%d/%m/%Y"),
         "Customer Name": row[1], "Solution Provider": row[2],
         "UPS Make": row[3], "UPS Model": row[4],
         "UPS Rating (KVA)": row[5], "Actual Load (KVA)": row[6],
@@ -304,28 +304,68 @@ def _sizing_row_to_data(row) -> dict:
     }
 
 
+def _copy_images(src_ws, dst_ws):
+    """Copy embedded images from src_ws to dst_ws (copy_worksheet drops them)."""
+    from io import BytesIO
+    from copy import deepcopy
+    from openpyxl.drawing.image import Image as XLImage
+    for img in getattr(src_ws, "_images", []):
+        try:
+            ref = img.ref
+            if hasattr(ref, "read"):
+                ref.seek(0)
+                data = ref.read()
+                ref.seek(0)
+            else:
+                with open(ref, "rb") as f:
+                    data = f.read()
+            new_img = XLImage(BytesIO(data))
+            new_img.anchor = deepcopy(img.anchor)
+            dst_ws.add_image(new_img)
+        except Exception:
+            pass
+
+
 def _build_excel(name: str, sr_no: Optional[int], db_path: str = None) -> str:
     import openpyxl
 
     template_path = str(APP_DIR / "templates" / "Sizing_template.xlsx")
     records = [(sr_no,)] if sr_no else [(r[0],) for r in fetch_all_sizings(name, db_path=db_path)]
 
-    wb = openpyxl.load_workbook(template_path)
-    first_ws = wb.active
+    template_wb = openpyxl.load_workbook(template_path)
+    template_ws = template_wb.active
+    out_wb = openpyxl.Workbook()
+    out_wb.remove(out_wb.active)
 
-    for idx, (sn,) in enumerate(records):
+    for sn, in records:
         row  = fetch_sizing_by_sr(name, sn, db_path=db_path)
         data = _sizing_row_to_data(row)
-        if idx == 0:
-            ws = first_ws
-        else:
-            ws = wb.copy_worksheet(first_ws)
-        ws.title = f"Sizing {sn}"
+        ws = out_wb.create_sheet(title=f"Sizing {sn}")
+        # copy dimensions, styles, merges from template
+        for col, dim in template_ws.column_dimensions.items():
+            ws.column_dimensions[col].width = dim.width
+        for row_n, dim in template_ws.row_dimensions.items():
+            ws.row_dimensions[row_n].height = dim.height
+        from copy import copy as _copy
+        for r in template_ws.iter_rows():
+            for cell in r:
+                nc = ws[cell.coordinate]
+                nc.value = cell.value
+                if cell.has_style:
+                    nc.font = _copy(cell.font)
+                    nc.border = _copy(cell.border)
+                    nc.fill = _copy(cell.fill)
+                    nc.number_format = _copy(cell.number_format)
+                    nc.protection = _copy(cell.protection)
+                    nc.alignment = _copy(cell.alignment)
+        for mr in template_ws.merged_cells.ranges:
+            ws.merge_cells(str(mr))
+        _copy_images(template_ws, ws)
         for key, cell_addr in SIZING_CELL_MAP.items():
             ws[cell_addr] = data.get(key, "")
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    wb.save(tmp.name)
+    out_wb.save(tmp.name)
     return tmp.name
 
 
@@ -385,13 +425,16 @@ def _build_wizard_excel(body: "WizardExportBody") -> str:
         except: return 0.0
 
     template_path = str(APP_DIR / "templates" / "Sizing_template.xlsx")
-    wb = openpyxl.load_workbook(template_path)
-    first_ws = wb.active
+    template_wb = openpyxl.load_workbook(template_path)
+    template_ws = template_wb.active
+    out_wb = openpyxl.Workbook()
+    out_wb.remove(out_wb.active)
 
     from datetime import datetime as _dt
+    from copy import copy as _copy
     for idx, col in enumerate(body.cols, 1):
         data = {
-            "Date": _dt.now().strftime("%d/%m/%Y"),
+            "Date": "Date: " + _dt.now().strftime("%d/%m/%Y"),
             "Customer Name": body.customer_name,
             "Solution Provider": body.solution_provider,
             "UPS Make": col.ups_make,
@@ -418,17 +461,31 @@ def _build_wizard_excel(body: "WizardExportBody") -> str:
             "Offered Battery Configuration": col.offered_battery_config,
             "Backup Time (Min)": num(col.backup_time_min),
         }
-        if idx == 1:
-            ws = first_ws
-        else:
-            ws = wb.copy_worksheet(first_ws)
-        ws.title = f"Sizing {idx}"
+        ws = out_wb.create_sheet(title=f"Sizing {idx}")
+        for c, dim in template_ws.column_dimensions.items():
+            ws.column_dimensions[c].width = dim.width
+        for rn, dim in template_ws.row_dimensions.items():
+            ws.row_dimensions[rn].height = dim.height
+        for r in template_ws.iter_rows():
+            for cell in r:
+                nc = ws[cell.coordinate]
+                nc.value = cell.value
+                if cell.has_style:
+                    nc.font = _copy(cell.font)
+                    nc.border = _copy(cell.border)
+                    nc.fill = _copy(cell.fill)
+                    nc.number_format = _copy(cell.number_format)
+                    nc.protection = _copy(cell.protection)
+                    nc.alignment = _copy(cell.alignment)
+        for mr in template_ws.merged_cells.ranges:
+            ws.merge_cells(str(mr))
+        _copy_images(template_ws, ws)
         for key, cell_addr in SIZING_CELL_MAP.items():
             if key in data:
                 ws[cell_addr] = data[key]
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    wb.save(tmp.name)
+    out_wb.save(tmp.name)
     return tmp.name
 
 
