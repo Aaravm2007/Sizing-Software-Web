@@ -44,6 +44,11 @@ def sanitize_code(code):
 def get_items_table_name(code):
     return f"items_{sanitize_code(code)}"
 
+def _table_exists(conn, table_name: str) -> bool:
+    c = conn.cursor()
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    return c.fetchone() is not None
+
 def create_quote_table(code, db_path=None):
     conn = get_db_connection(db_path)
     c = conn.cursor()
@@ -150,8 +155,9 @@ def clear_quotedata_table(quote_code, db_path=None):
     c = conn.cursor()
     table_name = get_items_table_name(quote_code)
     try:
-        c.execute(f'DELETE FROM {table_name}')
-        conn.commit()
+        if _table_exists(conn, table_name):
+            c.execute(f'DELETE FROM {table_name}')
+            conn.commit()
     except Exception:
         pass
     conn.close()
@@ -161,8 +167,9 @@ def delete_product_quote(quote_code, sr_no, db_path=None):
     c = conn.cursor()
     table_name = get_items_table_name(quote_code)
     try:
-        c.execute(f'DELETE FROM {table_name} WHERE sr_no = ?', (sr_no,))
-        conn.commit()
+        if _table_exists(conn, table_name):
+            c.execute(f'DELETE FROM {table_name} WHERE sr_no = ?', (sr_no,))
+            conn.commit()
     except Exception:
         pass
     conn.close()
@@ -172,6 +179,9 @@ def get_all_quote_products(quote_code, db_path=None):
     c = conn.cursor()
     table_name = get_items_table_name(quote_code)
     try:
+        if not _table_exists(conn, table_name):
+            conn.close()
+            return []
         c.execute(f'SELECT * FROM {table_name} ORDER BY sr_no')
         rows = c.fetchall()
     except Exception as e:
@@ -185,6 +195,9 @@ def get_highest_sr_no(quote_code, db_path=None):
     c = conn.cursor()
     table_name = get_items_table_name(quote_code)
     try:
+        if not _table_exists(conn, table_name):
+            conn.close()
+            return 0
         c.execute(f'SELECT MAX(sr_no) FROM {table_name}')
         result = c.fetchone()
         val = result[0] if result[0] is not None else 0

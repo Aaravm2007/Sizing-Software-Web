@@ -28,9 +28,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
     return decode_token(credentials.credentials)
 
 
-ADMIN_USERNAMES = {"a"}
-
 def get_admin_user(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("username") not in ADMIN_USERNAMES:
+    from config import settings
+    admin_usernames = {u.strip() for u in settings.ADMIN_USERNAME.split(",")}
+    if user.get("username") not in admin_usernames:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
