@@ -287,8 +287,11 @@ def _sizing_row_to_data(row) -> dict:
         load_label, load_value = "Actual Load (KVA)", kva
     else:
         load_label, load_value = "Actual Load", ""
+    ageing_type = (row[31] if len(row) > 31 else None) or "BOL"
+    backup_label = f"Backup Time (Min) at {ageing_type}"
     return {
         "_load_label": load_label, "_load_value": load_value,
+        "_backup_label": backup_label,
         "Date": "Date: " + _dt.now().strftime("%d/%m/%Y"),
         "Customer Name": row[1], "Solution Provider": row[2],
         "UPS Make": row[3], "UPS Model": row[4],
@@ -375,6 +378,7 @@ def _build_excel(name: str, sr_no: Optional[int], db_path: str = None) -> str:
             ws[cell_addr] = data.get(key, "")
         ws["D7"] = data["_load_label"]
         ws["D8"] = data["_load_value"]
+        ws["D30"] = data["_backup_label"]
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     out_wb.save(tmp.name)
@@ -402,6 +406,7 @@ class WizardCol(BaseModel):
     inverter_efficiency: str = ""
     nominal_dc_voltage: str = ""
     backup_requirement_min: str = ""
+    ageing_type: str = "BOL"
     ageing_percent: str = ""
     design_margin_percent: str = ""
     dod_margin_percent: str = ""
@@ -505,6 +510,7 @@ def _build_wizard_excel(body: "WizardExportBody") -> str:
                 ws[cell_addr] = data[key]
         ws["D7"] = w_load_label
         ws["D8"] = w_load_value
+        ws["D30"] = f"Backup Time (Min) at {col.ageing_type or 'BOL'}"
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     out_wb.save(tmp.name)
