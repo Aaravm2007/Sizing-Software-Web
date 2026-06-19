@@ -116,7 +116,7 @@ def delete_quote(code, db_path=None):
 def add_product_quote(quote_code, code, format, date, solution_provider, customer_name,
                       sr_no, sol_no, ups_rating, backup_requirement, calc_load,
                       celltype, centre_tapping, batterypartcode, backup_time,
-                      quantity, quote_price, modular_rack, db_path=None):
+                      quantity, quote_price, modular_rack, calc_load_unit="kW", db_path=None):
     conn = get_db_connection(db_path)
     c = conn.cursor()
     table_name = get_items_table_name(quote_code)
@@ -131,6 +131,7 @@ def add_product_quote(quote_code, code, format, date, solution_provider, custome
                "ups_rating" int,
                "backup_requirement" int,
                "calc_load" int,
+               "calc_load_unit" text,
                "celltype" text,
                "centre_tapping" text,
                "batterypartcode" text,
@@ -139,12 +140,16 @@ def add_product_quote(quote_code, code, format, date, solution_provider, custome
                "quote_price" int,
                "modular_rack" text
               )""")
+    try:
+        c.execute(f'ALTER TABLE {table_name} ADD COLUMN "calc_load_unit" text')
+    except Exception:
+        pass
     c.execute(f'''INSERT INTO {table_name} (code, format, date, solution_provider, customer_name,
-                sr_no, sol_no, ups_rating, backup_requirement, calc_load, celltype,
+                sr_no, sol_no, ups_rating, backup_requirement, calc_load, calc_load_unit, celltype,
                 centre_tapping, batterypartcode, backup_time, quantity, quote_price, modular_rack)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
               (code, format, date, solution_provider, customer_name, sr_no, sol_no,
-               ups_rating, backup_requirement, calc_load, celltype,
+               ups_rating, backup_requirement, calc_load, calc_load_unit, celltype,
                centre_tapping, batterypartcode, backup_time, quantity,
                quote_price, modular_rack))
     conn.commit()

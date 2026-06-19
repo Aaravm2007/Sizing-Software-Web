@@ -182,7 +182,8 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
                 bt_floor = math.floor(float(bt)) if bt and bt != "-" else 0
             except Exception:
                 bt_floor = 0
-            load_line = f"\n(Load: {d['calc_load']}kW)" if d.get("calc_load") else ""
+            load_unit = d.get("calc_load_unit") or "kW"
+            load_line = f"\n(Load: {d['calc_load']}{load_unit})" if d.get("calc_load") else ""
             system_text = d.get("system_text") or (
                 f"{d['ups_rating']}KVA : {d['backup_requirement']}Min Backup"
                 f"{load_line}\n"
@@ -430,17 +431,21 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
 
     if body.actual_load_kva > 0:
         calc_load_val = str(body.actual_load_kva)
+        calc_load_unit = "KVA"
     elif body.actual_load_kw > 0:
         calc_load_val = str(body.actual_load_kw)
+        calc_load_unit = "kW"
     else:
         calc_load_val = ""
+        calc_load_unit = "kW"
 
     add_product_quote(
         code, q_code, q_fmt, q_date, q_provider, q_customer,
         sr_no, sol_no, ups_rating_val,
         str(backup_time), calc_load_val,
         str(body.cell_type), str(body.centre_tap), str(body.partcode),
-        str(backup_time), body.quantity, quote_price, "-", tdb,
+        str(backup_time), body.quantity, quote_price, "-",
+        calc_load_unit=calc_load_unit, db_path=tdb,
     )
     return {"detail": "added", "sr_no": sr_no, "quote_price": quote_price}
 
