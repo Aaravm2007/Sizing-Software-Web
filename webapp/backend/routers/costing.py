@@ -450,6 +450,8 @@ def insert_row(body: CostingRow, user=Depends(get_current_user)):
 
 @router.put("/tree/{row_index}")
 def update_row(row_index: int, body: CostingRow, user=Depends(get_current_user)):
+    body.created_by = user.get("username", "")
+    body.creation_date = datetime.now().strftime("%d.%m.%y")
     db = get_user_costing_db(user["username"])
     _ensure_tree(db)
     conn = _get_conn(db)
@@ -587,8 +589,8 @@ def save_to_firebase(row_index: int, user=Depends(get_current_user)):
             "Installation indoor or outdoor": d["installation"],
             "Battery Partcode": d["partcode"],
             "Dollar Rate": d.get("dollar_rate", ""),
-            "Creation Date": d.get("creation_date", "") or datetime.now().strftime("%d.%m.%y"),
-            "Created By": d.get("created_by", "") or user.get("username", ""),
+            "Creation Date": datetime.now().strftime("%d.%m.%y"),
+            "Created By": user.get("username", ""),
             "active": True,
         }
         save_product_to_firebase(product)
