@@ -1,5 +1,6 @@
 import math
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime
@@ -108,6 +109,28 @@ def _row_to_dict(row: tuple) -> dict:
     return d
 
 
+def _inr(amount: float) -> str:
+    """Format a number in Indian numbering (e.g. 1,23,456.00)."""
+    rounded = round(amount, 2)
+    s = f"{rounded:.2f}"
+    integer_part, decimal_part = s.split(".")
+    neg = integer_part.startswith("-")
+    if neg:
+        integer_part = integer_part[1:]
+    if len(integer_part) <= 3:
+        formatted = integer_part
+    else:
+        last3 = integer_part[-3:]
+        rest = integer_part[:-3]
+        groups = []
+        while rest:
+            groups.append(rest[-2:] if len(rest) >= 2 else rest)
+            rest = rest[:-2] if len(rest) > 2 else ""
+        groups.reverse()
+        formatted = ",".join(groups) + "," + last3
+    return ("-" if neg else "") + formatted + "." + decimal_part
+
+
 def _generate_docx(quote_code: str, db_path: str = None) -> str:
     import docx
     from docx.shared import Pt
@@ -185,10 +208,10 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
         except Exception:
             price_f = 0
         if len(cells) > 4:
-            _set(cells[4], f"Rs. {round(price_f, 2)}/- +GST")
+            _set(cells[4], f"Rs. {_inr(price_f)}/- +GST")
         total = (int(d["quantity"]) if str(d["quantity"]).isdigit() else 0) * price_f
         if len(cells) > 5:
-            _set(cells[5], f"Rs. {round(total, 2)}/- +GST")
+            _set(cells[5], f"Rs. {_inr(total)}/- +GST")
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
     doc.save(tmp.name)
