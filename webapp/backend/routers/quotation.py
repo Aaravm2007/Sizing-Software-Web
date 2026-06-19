@@ -484,10 +484,11 @@ def firebase_list(_=Depends(get_current_user)):
 
 
 @router.post("/quotes/{code}/save-to-firebase")
-def save_to_firebase(code: str, _=Depends(get_current_user)):
+def save_to_firebase(code: str, user=Depends(get_current_user)):
     try:
         from basefunctions import save_quote
-        save_quote(target_code=code)
+        tdb = get_user_temp_db(user["username"])
+        save_quote(target_code=code, db_path=tdb)
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "saved"}

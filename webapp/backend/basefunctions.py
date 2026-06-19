@@ -89,8 +89,8 @@ def save_product_to_firebase(product):
     product_to_save = {k: v for k, v in product.items() if k != "Duration"}
     ref.set(product_to_save)
 
-def save_quote(target_code=None): 
-    conn = sqlite3.connect('temp.db')
+def save_quote(target_code=None, db_path=None):
+    conn = sqlite3.connect(db_path or 'temp.db')
     cursor = conn.cursor()
     
     codes_to_save = []
