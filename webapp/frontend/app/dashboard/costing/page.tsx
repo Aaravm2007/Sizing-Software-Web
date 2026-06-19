@@ -81,6 +81,12 @@ interface CostingRow {
   created_by?: string;
 }
 
+const TEXT_FIELDS = new Set<keyof CostingRow>([
+  "dollar_rate", "creation_date", "created_by",
+  "bms_pcm_type", "cell_chemistry", "centre_tap", "cell_type",
+  "application", "enclosure", "mount", "brand", "installation",
+]);
+
 const MONEY_FIELDS = new Set<keyof CostingRow>([
   "fob_cost", "total_fob", "clearing_customs_1", "total_landed_1", "cost_inr_1",
   "bms_pcm_cost", "clearing_customs_2", "total_landed_2", "cost_inr_2",
@@ -434,30 +440,34 @@ export default function CostingPage() {
             </thead>
             <tbody>
               {ROW_LABELS.map(([key, label], rowIdx) => {
-                const highlight = [19, 23, 36, 40].includes(rowIdx + 1);
-                const highlightGreen = [1, 4, 5, 6].includes(rowIdx + 1);
-                const rowBg = highlight ? "bg-yellow-100 dark:bg-yellow-900/40" : highlightGreen ? "bg-green-100 dark:bg-green-900/40" : "";
-                const rowText = highlight ? "text-red-600" : highlightGreen ? "text-green-900 dark:text-green-200" : "";
+                const isBlue = [19, 23, 36, 40].includes(rowIdx + 1);
+                const isGreen = [1, 4, 5, 6].includes(rowIdx + 1);
+                const isDiff = TEXT_FIELDS.has(key) && rows.length > 1 &&
+                  new Set(rows.map(r => String(r[key] ?? ""))).size > 1;
+                const rowBg = isBlue ? "bg-blue-100 dark:bg-blue-900/40" : isGreen ? "bg-green-100 dark:bg-green-900/40" : isDiff ? "bg-yellow-50 dark:bg-yellow-900/20" : "";
+                const rowText = isBlue ? "text-blue-800 dark:text-blue-200 font-bold" : isGreen ? "text-green-900 dark:text-green-200" : "";
                 return (
                 <tr key={key} className={rowBg}>
-                  <td className={`py-1.5 px-2 text-center text-xs sticky left-0 z-10 w-10 ${rowBg} ${highlight ? "font-bold" : ""} ${rowText || "text-muted-foreground"}`}>
+                  <td className={`py-1.5 px-2 text-center text-xs sticky left-0 z-10 w-10 ${rowBg} ${rowText || "text-muted-foreground"}`}>
                     {rowIdx + 1}
                   </td>
                   <td className={`col-sep py-1.5 px-3 font-medium sticky left-10 z-10 whitespace-nowrap ${rowBg || "bg-background"} ${rowText}`}>
                     {label}
                   </td>
-                  {rows.map((row, i) => (
-                    <td
-                      key={i}
-                      className={`py-1.5 px-3 text-center cursor-pointer hover:bg-accent
-                        ${rowText}
-                        ${selectedCol === i ? "bg-primary/10" : ""}`}
-                      onClick={() => setSelectedCol(i)}
-                      onDoubleClick={() => { setSelectedCol(i); setActionOpen(true); }}
-                    >
-                      {MONEY_FIELDS.has(key) ? fmtInr(row[key] as number) : String(row[key] ?? "")}
-                    </td>
-                  ))}
+                  {rows.map((row, i) => {
+                    const cellDiff = isDiff && String(row[key] ?? "") !== String(rows[0][key] ?? "");
+                    return (
+                      <td
+                        key={i}
+                        className={`py-1.5 px-3 text-center cursor-pointer hover:bg-accent ${rowText}
+                          ${selectedCol === i ? "bg-primary/10" : cellDiff ? "bg-yellow-200 dark:bg-yellow-700/50" : ""}`}
+                        onClick={() => setSelectedCol(i)}
+                        onDoubleClick={() => { setSelectedCol(i); setActionOpen(true); }}
+                      >
+                        {MONEY_FIELDS.has(key) ? fmtInr(row[key] as number) : String(row[key] ?? "")}
+                      </td>
+                    );
+                  })}
                 </tr>
                 );
               })}
