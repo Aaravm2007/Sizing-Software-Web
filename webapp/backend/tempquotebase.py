@@ -74,7 +74,7 @@ def create_quote_table(code, db_path=None):
                "system_text" text,
                "solution_text" text
               )""")
-    for col in ["system_text", "solution_text"]:
+    for col in ["system_text", "solution_text", "calc_load_unit"]:
         try:
             c.execute(f'ALTER TABLE {table_name} ADD COLUMN "{col}" text')
         except sqlite3.OperationalError:

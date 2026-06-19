@@ -40,6 +40,7 @@ interface QuoteItem {
   modular_rack: string;
   system_text?: string | null;
   solution_text?: string | null;
+  calc_load_unit?: string;
 }
 
 interface CostingRow {
@@ -212,7 +213,7 @@ export default function QuoteEditorPage() {
   const sensors = useSensors(useSensor(PointerSensor));
 
   const composeSystem = (item: QuoteItem) => {
-    const loadLine = item.calc_load ? `\n(Load: ${item.calc_load}kW)` : "";
+    const loadLine = item.calc_load ? `\n(Load: ${item.calc_load}${item.calc_load_unit || "kW"})` : "";
     return `${item.ups_rating}KVA : ${item.backup_requirement}Min Backup${loadLine}\n(Cell Type:${item.celltype})\n(${item.centre_tapping})`;
   };
 
