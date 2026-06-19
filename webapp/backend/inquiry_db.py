@@ -9,7 +9,7 @@ _COLS = [
     "project_customer", "ups_make", "ups_model", "ups_kva", "actual_load_kva",
     "load_kw", "power_factor", "inverter_efficiency", "dc_voltage", "backup_min",
     "cell_chemistry", "ageing_pct", "design_margin_pct", "dod_margin_pct",
-    "derating_pct", "capacity_ah", "centre_tap", "cell_type", "part_code",
+    "derating_pct", "capacity_ah", "centre_tap", "cell_type", "ageing_type", "backup_time_min", "part_code",
     "qty_system", "rate_system", "price_system", "rack_dim", "qty",
     "per_rack_price", "price", "custom_cost_desc", "custom_cost_price",
     "datasheet", "sizing_sheet", "gad", "battery_compliance", "warranty",
@@ -34,7 +34,7 @@ def init_inquiry_db():
         c.execute('CREATE TABLE IF NOT EXISTS inquiry_meta (next_id INTEGER DEFAULT 1)')
         if not c.execute('SELECT 1 FROM inquiry_meta').fetchone():
             c.execute('INSERT INTO inquiry_meta VALUES (1)')
-        for col in ["quote_code", "sol_no"]:
+        for col in ["quote_code", "sol_no", "ageing_type", "backup_time_min"]:
             try:
                 c.execute(f'ALTER TABLE inquiry ADD COLUMN "{col}" TEXT')
             except Exception:

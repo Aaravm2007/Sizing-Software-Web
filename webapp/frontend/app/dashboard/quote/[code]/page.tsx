@@ -41,6 +41,7 @@ interface QuoteItem {
   system_text?: string | null;
   solution_text?: string | null;
   calc_load_unit?: string;
+  ageing_type?: string;
 }
 
 interface CostingRow {
@@ -192,6 +193,50 @@ export default function QuoteEditorPage() {
   const [customCostPrice, setCustomCostPrice] = useState("");
   const [customCostQty, setCustomCostQty] = useState("1");
 
+  // edit meta
+  const [editMetaOpen, setEditMetaOpen] = useState(false);
+  const [metaCustomer, setMetaCustomer] = useState("");
+  const [metaProvider, setMetaProvider] = useState("");
+  const [metaSales, setMetaSales] = useState("");
+  const [metaDate, setMetaDate] = useState("");
+  const [metaFormat, setMetaFormat] = useState("");
+  const [metaCode, setMetaCode] = useState("");
+
+  const openEditMeta = async () => {
+    const first = items[0];
+    setMetaCustomer(first?.customer_name ?? "");
+    setMetaProvider(first?.solution_provider ?? "");
+    setMetaDate(first?.date ?? "");
+    setMetaFormat(first?.format ?? "");
+    setMetaCode(code);
+    // fetch sales_person from quotes list
+    try {
+      const res = await api.get("/api/quotation/quotes");
+      const q = (res.data as any[]).find(q => q.code === code);
+      setMetaSales(q?.sales_person ?? "");
+    } catch { setMetaSales(""); }
+    setEditMetaOpen(true);
+  };
+
+  const saveMetaMut = useMutation({
+    mutationFn: () => api.patch(`/api/quotation/quotes/${encodeURIComponent(code)}/meta`, {
+      customer_name: metaCustomer,
+      solution_provider: metaProvider,
+      sales_person: metaSales,
+      date: metaDate,
+      format_name: metaFormat,
+      new_code: metaCode,
+    }),
+    onSuccess: (res) => {
+      setEditMetaOpen(false);
+      qc.invalidateQueries({ queryKey: qKey });
+      toast.success("Quote updated");
+      const nc = res.data?.new_code;
+      if (nc && nc !== code) router.replace(`/dashboard/quote/${encodeURIComponent(nc)}`);
+    },
+    onError: (e: any) => toast.error(apiErr(e, "Update failed")),
+  });
+
   // edit item
   const [editOpen, setEditOpen] = useState(false);
   const [editItem, setEditItem] = useState<QuoteItem | null>(null);
@@ -218,7 +263,7 @@ export default function QuoteEditorPage() {
   };
 
   const composeSolution = (item: QuoteItem, sn: number | null) =>
-    `Solution${sn ?? "?"}: Lithium Battery Pack\n(${item.batterypartcode}) with\nApprox Backup: ${item.backup_time}Mins At BOL\nWith Cabinet and inbuilt BMS`;
+    `Solution${sn ?? "?"}: Lithium Battery Pack\n(${item.batterypartcode}) with\nApprox Backup: ${item.backup_time || "-"}Mins At ${item.ageing_type || "BOL"}\nWith Cabinet and inbuilt BMS`;
 
   const openEdit = (item: QuoteItem, sn: number | null) => {
     setEditItem(item);
@@ -404,6 +449,9 @@ export default function QuoteEditorPage() {
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="outline" onClick={() => router.push("/dashboard/quote")}>← Back</Button>
         <h1 className="text-2xl font-bold">Quote: {code}</h1>
+        <Button variant="ghost" size="icon" onClick={openEditMeta} title="Edit quote details">
+          <Pencil className="h-4 w-4" />
+        </Button>
         <Button variant="outline" onClick={() => setAddCostingOpen(true)}>
           Add from Costing
         </Button>
@@ -511,6 +559,53 @@ export default function QuoteEditorPage() {
       {approvalItem && (
         <SubmitApprovalDialog open={!!approvalItem} item={approvalItem} onClose={() => setApprovalItem(null)} />
       )}
+
+      {/* Edit Quote Meta Dialog */}
+      <Dialog open={editMetaOpen} onOpenChange={setEditMetaOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Edit Quote Details</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quote Code</Label>
+              <Input value={metaCode} onChange={e => setMetaCode(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</Label>
+              <Input type="date" value={metaDate} onChange={e => setMetaDate(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Customer Name</Label>
+              <Input value={metaCustomer} onChange={e => setMetaCustomer(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Solution Provider</Label>
+              <Input value={metaProvider} onChange={e => setMetaProvider(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Sales Person</Label>
+              <Input value={metaSales} onChange={e => setMetaSales(e.target.value)} placeholder="Leave blank to keep current" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Format</Label>
+              <select
+                className="border rounded-md px-3 py-2 text-sm bg-background"
+                value={metaFormat}
+                onChange={e => setMetaFormat(e.target.value)}
+              >
+                {["High voltage","Low voltage","Extended Warranty High Voltage","Extended Warranty Low Voltage","Low & High Voltage Export"].map(f => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditMetaOpen(false)}>Cancel</Button>
+            <Button onClick={() => saveMetaMut.mutate()} disabled={saveMetaMut.isPending}>
+              {saveMetaMut.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Item Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

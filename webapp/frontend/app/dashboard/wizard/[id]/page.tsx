@@ -312,6 +312,8 @@ export default function WizardComparePage() {
       const res = await api.post(`/api/quotation/quotes/${quoteCode}/add-from-sizing-screen`, {
         battery_config:    col.offered_battery_config,
         duration:          row?.duration || col.backup_requirement_min,
+        backup_time_min:   col.backup_time_min || col.backup_requirement_min,
+        ageing_type:       col.ageing_type || "BOL",
         kw_calculation:    cKw,
         cell_type:         row?.cell_type || col.cell_type,
         centre_tap:        row?.centre_tap || col.centre_tap,

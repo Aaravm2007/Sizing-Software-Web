@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import { RefreshCw, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── column definitions ────────────────────────────────────────────────────────
@@ -42,6 +42,8 @@ const COLS: Col[] = [
   { key: "capacity_ah",         label: "Capacity (Ah)",       width: 100, type: "text"   },
   { key: "centre_tap",        label: "Centre Tap",         width: 90,  type: "text"   },
   { key: "cell_type",         label: "Cell Type",          width: 110, type: "text"   },
+  { key: "ageing_type",       label: "BOL/EOL",            width: 70,  type: "text"   },
+  { key: "backup_time_min",   label: "Backup Time (min)",  width: 120, type: "text"   },
   { key: "part_code",         label: "Part Code",          width: 200, type: "text"   },
   { key: "qty_system",        label: "Qty (System)",       width: 85,  type: "number" },
   { key: "rate_system",       label: "Rate (System ₹)",    width: 120, type: "number" },
@@ -97,12 +99,6 @@ export default function InquiryPage() {
   const [editVal, setEditVal] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // ── add row ────────────────────────────────────────────────────────────────
-  const addMut = useMutation({
-    mutationFn: () => api.post("/api/inquiry", {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qKey }),
-    onError: (e: any) => toast.error(apiErr(e, "Add failed")),
-  });
 
   // ── delete row ─────────────────────────────────────────────────────────────
   const delMut = useMutation({
@@ -156,9 +152,9 @@ export default function InquiryPage() {
         <h1 className="text-lg font-bold">UPS Inquiry Sheet</h1>
         <span className="text-xs text-muted-foreground">{entries.length} entries</span>
         <div className="flex-1" />
-        <Button size="sm" className="gap-1.5" onClick={() => addMut.mutate()} disabled={addMut.isPending}>
-          <Plus className="h-3.5 w-3.5" />
-          Add Row
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => qc.invalidateQueries({ queryKey: qKey })}>
+          <RefreshCw className="h-3.5 w-3.5" />
+          Reload
         </Button>
       </div>
 
@@ -186,7 +182,7 @@ export default function InquiryPage() {
               <tr>
                 <td colSpan={COLS.length + 2}
                   className="text-center text-muted-foreground py-12 text-sm">
-                  No entries yet — click Add Row to start
+                  No entries yet
                 </td>
               </tr>
             )}

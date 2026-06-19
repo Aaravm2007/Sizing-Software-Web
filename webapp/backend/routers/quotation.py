@@ -20,7 +20,7 @@ sys.path.insert(0, str(BACKEND_DIR))
 from tempquotebase import (
     init_temp_db, add_new_quote, get_all_quotes, delete_quote,
     add_product_quote, get_all_quote_products, clear_quotedata_table,
-    get_highest_sr_no,
+    get_highest_sr_no, get_db_connection, get_items_table_name,
 )
 from auth import get_current_user
 from user_db import get_user_costing_db, get_user_temp_db, get_user_wizard_temp_db, get_user_sizing_db
@@ -106,11 +106,12 @@ def _row_to_dict(row: tuple) -> dict:
             "sr_no","sol_no","ups_rating","backup_requirement","calc_load",
             "celltype","centre_tapping","batterypartcode","backup_time",
             "quantity","quote_price","modular_rack","system_text","solution_text",
-            "calc_load_unit","item_type"]
+            "calc_load_unit","item_type","ageing_type"]
     d = dict(zip(keys, row))
     d.setdefault("system_text", None)
     d.setdefault("solution_text", None)
     d.setdefault("calc_load_unit", "kW")
+    d.setdefault("ageing_type", "BOL")
     return d
 
 
@@ -184,9 +185,10 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
             sol_no += 1
             bt = d["backup_time"]
             try:
-                bt_floor = math.floor(float(bt)) if bt and bt != "-" else 0
+                bt_floor = str(math.floor(float(bt))) if bt and bt not in ("-", "0", "") else "-"
             except Exception:
-                bt_floor = 0
+                bt_floor = "-"
+            ageing_lbl = d.get("ageing_type") or "BOL"
             load_unit = d.get("calc_load_unit") or "kW"
             load_line = f"\n(Load: {d['calc_load']}{load_unit})" if d.get("calc_load") else ""
             system_text = d.get("system_text") or (
@@ -198,7 +200,7 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
             solution_text = d.get("solution_text") or (
                 f"Solution{sol_no}: Lithium Battery Pack\n"
                 f"({d['batterypartcode']}) with\n"
-                f"Approximate Backup Time: {bt_floor}Mins At BOL\n"
+                f"Approximate Backup Time: {bt_floor}Mins At {ageing_lbl}\n"
                 f"With Cabinet and inbuilt BMS"
             )
 
@@ -268,6 +270,69 @@ def create_quote(body: QuoteCreate, user=Depends(get_current_user), scope: str =
     return {"code": body.code}
 
 
+class PatchMetaReq(BaseModel):
+    customer_name: str = ""
+    solution_provider: str = ""
+    sales_person: str = ""
+    date: str = ""
+    format_name: str = ""
+    new_code: str = ""
+
+@router.patch("/quotes/{code}/meta", status_code=200)
+def patch_meta(code: str, body: PatchMetaReq, user=Depends(get_current_user), scope: str = Query("regular")):
+    import sqlite3 as _sq3
+    tdb = _tdb(user["username"], scope)
+    quotes = get_all_quotes(tdb)
+    meta = next((q for q in quotes if q[0] == code), None)
+    if not meta:
+        raise HTTPException(404, "Quote not found")
+
+    fname = TEMPLATE_MAP.get(body.format_name, meta[4]) if body.format_name else meta[4]
+    new_code = body.new_code.strip() if body.new_code.strip() else code
+    customer = body.customer_name or meta[2]
+    provider = body.solution_provider or meta[3]
+    sales = body.sales_person if body.sales_person is not None else (meta[5] if len(meta) > 5 else "")
+    date = body.date or meta[1]
+
+    conn = get_db_connection(tdb)
+    try:
+        c = conn.cursor()
+        c.execute(
+            "UPDATE active_quotes SET customer_name=?, solution_provider=?, sales_person=?, date=?, format=? WHERE code=?",
+            (customer, provider, sales, date, fname, code)
+        )
+        if new_code != code:
+            existing = c.execute("SELECT code FROM active_quotes WHERE code=?", (new_code,)).fetchone()
+            if existing:
+                raise HTTPException(400, f"Quote code '{new_code}' already exists")
+            c.execute("UPDATE active_quotes SET code=? WHERE code=?", (new_code, code))
+            old_tbl = get_items_table_name(code)
+            new_tbl = get_items_table_name(new_code)
+            try:
+                c.execute(f'ALTER TABLE "{old_tbl}" RENAME TO "{new_tbl}"')
+                c.execute(f'UPDATE "{new_tbl}" SET code=?', (new_code,))
+            except Exception:
+                pass
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        from inquiry_db import _conn as _inq_conn, init_inquiry_db as _inq_init
+        _inq_init()
+        with _inq_conn() as c:
+            c.execute(
+                "UPDATE inquiry SET project_customer=?, solution_provider=?, sales_person=? WHERE quote_code=?",
+                (customer, provider, sales, code)
+            )
+            if new_code != code:
+                c.execute("UPDATE inquiry SET quote_code=? WHERE quote_code=?", (new_code, code))
+    except Exception:
+        pass
+
+    return {"detail": "updated", "new_code": new_code}
+
+
 @router.delete("/quotes/{code}")
 def remove_quote(code: str, user=Depends(get_current_user), scope: str = Query("regular")):
     tdb = _tdb(user["username"], scope)
@@ -318,6 +383,8 @@ def delete_item(code: str, sr_no: int, user=Depends(get_current_user)):
         raise HTTPException(404, "Quote not found")
     _, date, customer, provider, fmt, *_ = meta
 
+    deleted_d = next((_row_to_dict(i) for i in all_products if str(_row_to_dict(i)["sr_no"]) == str(sr_no)), None)
+
     clear_quotedata_table(code, tdb)
     new_sr = 0
     for item in all_products:
@@ -331,10 +398,15 @@ def delete_item(code: str, sr_no: int, user=Depends(get_current_user)):
             d["backup_requirement"], d["calc_load"], d["celltype"],
             d["centre_tapping"], d["batterypartcode"], d["backup_time"],
             d["quantity"], d["quote_price"], d["modular_rack"],
-            item_type=d.get("item_type") or "system", db_path=tdb,
+            item_type=d.get("item_type") or "system", ageing_type=d.get("ageing_type") or "BOL", db_path=tdb,
         )
     try:
-        from inquiry_db import sync_inquiry_for_quote as _sync_inq
+        from inquiry_db import sync_inquiry_for_quote as _sync_inq, _conn as _inq_conn, init_inquiry_db as _inq_init
+        _inq_init()
+        if deleted_d and str(deleted_d.get("item_type", "system")) == "system":
+            with _inq_conn() as c:
+                c.execute('DELETE FROM inquiry WHERE quote_code = ? AND sol_no = ?',
+                          (code, str(deleted_d.get("sol_no", ""))))
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
         _sync_inq(code, updated)
     except Exception:
@@ -399,9 +471,9 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
 
     add_product_quote(
         code, q_code, q_fmt, q_date, q_provider, q_customer,
-        sr_no, sol_no, "-", str(backup_time), "-",
+        sr_no, sol_no, "-", "-", "-",
         str(celltype), str(centre_tapping), str(batterypartcode),
-        str(backup_time), body.quantity, quote_price, "-", item_type="system", db_path=tdb,
+        "-", body.quantity, quote_price, "-", item_type="system", ageing_type="BOL", db_path=tdb,
     )
 
     if body.sizing_project and body.sizing_sr_no:
@@ -429,6 +501,7 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
                     "dod_margin_pct": str(srow[14] or ""), "derating_pct": str(srow[15] or ""),
                     "capacity_ah": str(srow[27] or ""),
                     "centre_tap": str(centre_tapping or ""), "cell_type": str(celltype or ""),
+                    "ageing_type": "BOL", "backup_time_min": "-",
                     "part_code": str(batterypartcode or ""),
                     "qty_system": str(body.quantity), "rate_system": str(unit_price),
                     "price_system": str(quote_price),
@@ -451,6 +524,8 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
 class AddFromWizardReq(BaseModel):
     battery_config: str = ""
     duration: str = ""
+    backup_time_min: str = "0"
+    ageing_type: str = "BOL"
     kw_calculation: float = 0
     cell_type: str = ""
     centre_tap: str = ""
@@ -471,11 +546,6 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
     multipliers = {"A": 1.0, "B-5": 1.05, "B": 1.10, "B+5": 1.15, "C": 1.20, "C+5": 1.25}
     mult = (1.0 + body.custom_pct / 100.0) if body.price_option == "custom" else multipliers.get(body.price_option, 1.10)
     quote_price = round(body.total_cost * mult, 2)
-
-    try:
-        backup_time = float("".join(c for c in body.duration if c.isdigit() or c == "."))
-    except Exception:
-        backup_time = 0.0
 
     tdb = _tdb(user["username"], scope)
     quotes = get_all_quotes(tdb)
@@ -500,13 +570,22 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
         calc_load_val = ""
         calc_load_unit = "kW"
 
+    # backup_time_min = actual sizing-calculated backup; fall back to duration if absent
+    raw_bt = body.backup_time_min if body.backup_time_min and body.backup_time_min != "0" else body.duration
+    try:
+        backup_time = str(math.floor(float("".join(c for c in raw_bt if c.isdigit() or c == ".")))) if raw_bt else "-"
+    except Exception:
+        backup_time = "-"
+
+    ageing_type = body.ageing_type or "BOL"
+
     add_product_quote(
         code, q_code, q_fmt, q_date, q_provider, q_customer,
         sr_no, sol_no, ups_rating_val,
         str(backup_time), calc_load_val,
         str(body.cell_type), str(body.centre_tap), str(body.partcode),
         str(backup_time), body.quantity, quote_price, "-",
-        calc_load_unit=calc_load_unit, item_type="system", db_path=tdb,
+        calc_load_unit=calc_load_unit, item_type="system", ageing_type=ageing_type, db_path=tdb,
     )
 
     try:
@@ -520,6 +599,8 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
             sdb = get_user_sizing_db(user["username"])
             srow = fetch_sizing_by_sr(body.sizing_project, body.sizing_sr_no, db_path=sdb)
             if srow:
+                _srow_ageing = str(srow[31]) if len(srow) > 31 and srow[31] else "BOL"
+                _srow_bt = str(math.floor(float(srow[30]))) if len(srow) > 30 and srow[30] else "-"
                 _push_inq({
                     "inquiry_date": q_date,
                     "type": _type, "sales_person": str(q_sales or ""),
@@ -535,6 +616,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                     "dod_margin_pct": str(srow[14] or ""), "derating_pct": str(srow[15] or ""),
                     "capacity_ah": str(srow[27] or ""),
                     "centre_tap": str(body.centre_tap or ""), "cell_type": str(body.cell_type or ""),
+                    "ageing_type": _srow_ageing, "backup_time_min": _srow_bt,
                     "part_code": str(body.partcode or ""),
                     "qty_system": str(body.quantity), "rate_system": str(unit_price),
                     "price_system": str(quote_price),
@@ -578,11 +660,12 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                 "load_kw": str(body.actual_load_kw or body.calculated_load_kw or ""),
                 "power_factor": "", "inverter_efficiency": "",
                 "dc_voltage": _dc_volt,
-                "backup_min": str(backup_time) if backup_time else "",
+                "backup_min": str(backup_time if backup_time != "-" else ""),
                 "cell_chemistry": str(_crow.get("cell_chemistry", "") or "LFP"),
                 "ageing_pct": "", "design_margin_pct": "", "dod_margin_pct": "", "derating_pct": "",
                 "capacity_ah": str(_crow.get("ampere_capacity", "") or ""),
                 "centre_tap": str(body.centre_tap or ""), "cell_type": str(body.cell_type or ""),
+                "ageing_type": ageing_type, "backup_time_min": backup_time,
                 "part_code": str(body.partcode or ""),
                 "qty_system": str(body.quantity), "rate_system": str(unit_price),
                 "price_system": str(quote_price),

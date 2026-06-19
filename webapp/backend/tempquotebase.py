@@ -116,7 +116,7 @@ def delete_quote(code, db_path=None):
 def add_product_quote(quote_code, code, format, date, solution_provider, customer_name,
                       sr_no, sol_no, ups_rating, backup_requirement, calc_load,
                       celltype, centre_tapping, batterypartcode, backup_time,
-                      quantity, quote_price, modular_rack, calc_load_unit="kW", item_type="system", db_path=None):
+                      quantity, quote_price, modular_rack, calc_load_unit="kW", item_type="system", ageing_type="BOL", db_path=None):
     conn = get_db_connection(db_path)
     c = conn.cursor()
     table_name = get_items_table_name(quote_code)
@@ -140,19 +140,19 @@ def add_product_quote(quote_code, code, format, date, solution_provider, custome
                "quote_price" int,
                "modular_rack" text
               )""")
-    for col in ["calc_load_unit", "item_type"]:
+    for col in ["calc_load_unit", "item_type", "ageing_type"]:
         try:
             c.execute(f'ALTER TABLE {table_name} ADD COLUMN "{col}" text')
         except Exception:
             pass
     c.execute(f'''INSERT INTO {table_name} (code, format, date, solution_provider, customer_name,
                 sr_no, sol_no, ups_rating, backup_requirement, calc_load, calc_load_unit, celltype,
-                centre_tapping, batterypartcode, backup_time, quantity, quote_price, modular_rack, item_type)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                centre_tapping, batterypartcode, backup_time, quantity, quote_price, modular_rack, item_type, ageing_type)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
               (code, format, date, solution_provider, customer_name, sr_no, sol_no,
                ups_rating, backup_requirement, calc_load, calc_load_unit, celltype,
                centre_tapping, batterypartcode, backup_time, quantity,
-               quote_price, modular_rack, item_type))
+               quote_price, modular_rack, item_type, ageing_type))
     conn.commit()
     conn.close()
 
