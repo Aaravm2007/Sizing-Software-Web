@@ -411,9 +411,84 @@ function SizingFormulasTable() {
   );
 }
 
+// ── Backup time presets ────────────────────────────────────────────────────────
+
+interface BackupTime { name: string; has_products: boolean; is_preset: boolean; product_count: number; }
+
+function BackupTimesTable() {
+  const qc = useQueryClient();
+  const [newName, setNewName] = useState("");
+
+  const { data: rows = [], isLoading } = useQuery<BackupTime[]>({
+    queryKey: ["backup-times"],
+    queryFn: () => api.get("/api/formulas/backup-times").then((r) => r.data),
+  });
+
+  const add = useMutation({
+    mutationFn: () => api.post("/api/formulas/backup-times", { name: newName.trim() }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["backup-times"] }); qc.invalidateQueries({ queryKey: ["costing-durations"] }); setNewName(""); toast.success("Added"); },
+    onError: (e: any) => toast.error(apiErr(e, "Add failed")),
+  });
+
+  const remove = useMutation({
+    mutationFn: (name: string) => api.delete(`/api/formulas/backup-times/${encodeURIComponent(name)}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["backup-times"] }); qc.invalidateQueries({ queryKey: ["costing-durations"] }); toast.success("Deleted"); },
+    onError: (e: any) => toast.error(apiErr(e, "Delete failed")),
+  });
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex gap-2 items-center">
+        <Input
+          className="w-40"
+          placeholder="e.g. 900min"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && newName.trim() && add.mutate()}
+        />
+        <Button size="sm" onClick={() => add.mutate()} disabled={!newName.trim() || add.isPending}>
+          <Plus className="h-4 w-4 mr-1" /> Add
+        </Button>
+      </div>
+      {isLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Duration</TableHead>
+              <TableHead>Products</TableHead>
+              <TableHead>Custom Preset</TableHead>
+              <TableHead></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((r) => (
+              <TableRow key={r.name}>
+                <TableCell className="font-mono">{r.name}</TableCell>
+                <TableCell>{r.has_products ? r.product_count : "—"}</TableCell>
+                <TableCell>{r.is_preset ? "Yes" : "—"}</TableCell>
+                <TableCell>
+                  {r.is_preset && (
+                    <button
+                      className="text-destructive hover:opacity-70"
+                      onClick={() => remove.mutate(r.name)}
+                      disabled={remove.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type Tab = "cell-voltages" | "dc-cells" | "formulas";
+type Tab = "cell-voltages" | "dc-cells" | "formulas" | "backup-times";
 
 export default function FormulasPage() {
   const [tab, setTab] = useState<Tab>("cell-voltages");
@@ -421,7 +496,7 @@ export default function FormulasPage() {
   return (
     <div className="p-6 flex flex-col gap-6 max-w-4xl">
       <div>
-        <h1 className="text-2xl font-bold">Formula Editor</h1>
+        <h1 className="text-2xl font-bold">Masters</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Edit cell chemistry voltages, DC→Cell mappings, and sizing formula expressions.
         </p>
@@ -429,7 +504,7 @@ export default function FormulasPage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b pb-0">
-        {(["cell-voltages", "dc-cells", "formulas"] as Tab[]).map((t) => (
+        {(["cell-voltages", "dc-cells", "formulas", "backup-times"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -440,7 +515,7 @@ export default function FormulasPage() {
                 : "border-transparent text-muted-foreground hover:text-foreground")
             }
           >
-            {t === "cell-voltages" ? "Cell Voltages" : t === "dc-cells" ? "DC → Cells" : "Sizing Formulas"}
+            {t === "cell-voltages" ? "Cell Voltages" : t === "dc-cells" ? "DC → Cells" : t === "formulas" ? "Sizing Formulas" : "Backup Time Presets"}
           </button>
         ))}
       </div>
@@ -474,6 +549,17 @@ export default function FormulasPage() {
           </CardHeader>
           <CardContent>
             <SizingFormulasTable />
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === "backup-times" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Backup Time Presets</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BackupTimesTable />
           </CardContent>
         </Card>
       )}

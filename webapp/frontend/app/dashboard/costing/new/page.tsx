@@ -227,6 +227,8 @@ function NewCostingInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editIdx = searchParams.get("edit");
+  const fromSizing = searchParams.get("from") === "sizing";
+  const backUrl = searchParams.get("back") || "";
   const qc = useQueryClient();
 
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -409,7 +411,8 @@ function NewCostingInner() {
     onSuccess: () => {
       toast.success("Saved");
       qc.invalidateQueries({ queryKey: ["costing-tree"] });
-      router.push("/dashboard/costing");
+      const qs = fromSizing ? `?from=sizing&back=${encodeURIComponent(backUrl)}` : "";
+      router.push(`/dashboard/costing${qs}`);
     },
     onError: (e: any) => toast.error(apiErr(e, "Save failed")),
   });
@@ -417,7 +420,10 @@ function NewCostingInner() {
   return (
     <div className="flex flex-col h-full overflow-auto p-5 gap-4">
       <div className="flex items-center gap-3">
-        <Button variant="outline" onClick={() => router.push("/dashboard/costing")}>← Back</Button>
+        <Button variant="outline" onClick={() => {
+          const qs = fromSizing ? `?from=sizing&back=${encodeURIComponent(backUrl)}` : "";
+          router.push(`/dashboard/costing${qs}`);
+        }}>← Back</Button>
         <h1 className="text-2xl font-bold">{editIdx !== null ? "Edit" : "New"} Costing</h1>
         <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
           {editIdx !== null ? "Update" : "Add to Table"}

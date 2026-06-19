@@ -13,7 +13,7 @@ const SECTIONS = [
   { label: "Quotation",     href: "/dashboard/quote",     icon: FileText,      desc: "Create, edit, and export customer quotations",          expertOnly: false },
   { label: "Datasheet",     href: "/dashboard/datasheet", icon: BookOpen,      desc: "Browse and download product datasheets",                expertOnly: false },
   { label: "GAD",           href: "/dashboard/gad",       icon: Layout,        desc: "Browse and download General Arrangement Drawings",      expertOnly: false },
-  { label: "Formula Editor",href: "/dashboard/formulas",  icon: FlaskConical,  desc: "Edit cell chemistry voltages and DC→Cell mappings",     expertOnly: true  },
+  { label: "Masters",       href: "/dashboard/formulas",  icon: FlaskConical,  desc: "Edit cell chemistry voltages and DC→Cell mappings",     expertOnly: true  },
   { label: "Records",       href: "/dashboard/records",   icon: Archive,       desc: "View, restore, and manage saved records",               expertOnly: false },
   { label: "Project",       href: "/dashboard/project",   icon: FolderOpen,    desc: "Bundle records, datasheets and GADs into projects and export as ZIP", expertOnly: false },
   { label: "Approvals",     href: "/dashboard/approvals", icon: ClipboardCheck,  desc: "Submit files for expert review or manage incoming requests", expertOnly: false },

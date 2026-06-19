@@ -185,15 +185,10 @@ def check_quote_exists(code):
 
 def get_all_durations():
     """Get all durations sorted by their numeric value in ascending order."""
-    ref = db.reference('products')
-    products_data = ref.get()
-    all_durations = []
-    if products_data:
-        for subgroup in products_data.keys():
-            all_durations.append(subgroup)
-    # Sort by extracting numeric part
-    all_durations.sort(key=lambda x: int(''.join(filter(str.isdigit, x))))
-    return all_durations
+    products_data = db.reference('products').get() or {}
+    presets_data = db.reference('duration_presets').get() or {}
+    all_durations = set(products_data.keys()) | set(presets_data.keys())
+    return sorted(all_durations, key=lambda x: int(''.join(filter(str.isdigit, x)) or '0'))
 
 
 '''def get_all_durations():

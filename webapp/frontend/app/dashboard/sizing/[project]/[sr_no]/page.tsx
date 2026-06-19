@@ -133,7 +133,7 @@ export default function SizingFormPage() {
       actual_load_kva: sNum(existing.actual_load_kva),
       actual_load_kw: sNum(existing.actual_load_kw),
       power_factor: sNum(existing.power_factor),
-      inverter_efficiency: sNum(existing.inverter_efficiency),
+      inverter_efficiency: sNum(existing.inverter_efficiency ? existing.inverter_efficiency * 100 : ""),
       nominal_dc_voltage: sNum(existing.nominal_dc_voltage),
       backup_requirement_min: sNum(existing.backup_requirement_min),
       cell_chemistry: existing.cell_chemistry ?? "LFP",
@@ -166,7 +166,7 @@ export default function SizingFormPage() {
       actualKva: n(f.actual_load_kva),
       upsKva: n(f.ups_rating_kva),
       powerFactor: n(f.power_factor),
-      inverterEfficiency: n(f.inverter_efficiency) || 1,
+      inverterEfficiency: (n(f.inverter_efficiency) / 100) || 1,
       nominalDcVoltage: n(f.nominal_dc_voltage),
       backupRequirementMin: n(f.backup_requirement_min),
       ageingPct: n(f.ageing_percent),
@@ -236,7 +236,7 @@ export default function SizingFormPage() {
           actual_load_kva: n(form.actual_load_kva),
           actual_load_kw: n(form.actual_load_kw),
           power_factor: n(form.power_factor),
-          inverter_efficiency: n(form.inverter_efficiency),
+          inverter_efficiency: n(form.inverter_efficiency) / 100,
           nominal_dc_voltage: n(form.nominal_dc_voltage),
           backup_requirement_min: n(form.backup_requirement_min),
           cell_chemistry: form.cell_chemistry,
@@ -472,8 +472,8 @@ export default function SizingFormPage() {
           <Row label="Power Factor">
             <Input type="number" step="0.01" value={form.power_factor} onChange={set("power_factor")} />
           </Row>
-          <Row label="Inverter Efficiency">
-            <Input type="number" step="0.01" value={form.inverter_efficiency} onChange={set("inverter_efficiency")} />
+          <Row label="Inverter Efficiency (%)">
+            <Input type="number" step="1" min={0} max={100} value={form.inverter_efficiency} onChange={set("inverter_efficiency")} />
           </Row>
           <Row label="Nominal DC Voltage (V)">
             <select

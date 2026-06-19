@@ -22,7 +22,7 @@ const NAV = [
   { label: "Quote",     href: "/dashboard/quote",     icon: FileText,      expertOnly: false },
   { label: "Datasheet", href: "/dashboard/datasheet", icon: BookOpen,      expertOnly: false },
   { label: "GAD",       href: "/dashboard/gad",       icon: Layout,        expertOnly: false },
-  { label: "Formulas",  href: "/dashboard/formulas",  icon: FlaskConical,  expertOnly: true  },
+  { label: "Masters",   href: "/dashboard/formulas",  icon: FlaskConical,  expertOnly: true  },
   { label: "Records",   href: "/dashboard/records",   icon: Archive,       expertOnly: false },
   { label: "Project",   href: "/dashboard/project",   icon: FolderOpen,    expertOnly: false },
   { label: "Approvals", href: "/dashboard/approvals", icon: ClipboardCheck, expertOnly: false },

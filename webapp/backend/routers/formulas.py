@@ -9,7 +9,7 @@ from typing import Optional
 APP_DIR = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(APP_DIR))
 
-from auth import get_current_user, get_admin_user
+from auth import get_current_user, get_admin_user, get_expert_user
 
 router = APIRouter()
 
@@ -286,3 +286,62 @@ def reset_sizing_formula(name: str, _=Depends(get_admin_user)):
         )
         con.commit()
     return {"detail": "reset", "expression": defaults[name]}
+
+
+# ── backup time presets ────────────────────────────────────────────────────────
+
+def _fb_db():
+    from firebase_admin import db as fdb
+    return fdb
+
+class BackupTimeIn(BaseModel):
+    name: str  # e.g. "900min"
+
+@router.get("/backup-times")
+def list_backup_times(_=Depends(get_current_user)):
+    try:
+        fdb = _fb_db()
+        products = fdb.reference("products").get() or {}
+        presets = fdb.reference("duration_presets").get() or {}
+        all_names = set(products.keys()) | set(presets.keys())
+        sorted_names = sorted(all_names, key=lambda x: int("".join(filter(str.isdigit, x)) or "0"))
+        preset_set = set(presets.keys())
+        return [
+            {
+                "name": n,
+                "has_products": n in products,
+                "is_preset": n in preset_set,
+                "product_count": len(products[n]) if isinstance(products.get(n), dict) else (len(products[n]) if isinstance(products.get(n), list) else 0),
+            }
+            for n in sorted_names
+        ]
+    except Exception as e:
+        raise HTTPException(503, f"Firebase error: {e}")
+
+@router.post("/backup-times", status_code=201)
+def add_backup_time(body: BackupTimeIn, _=Depends(get_expert_user)):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Name required")
+    if not any(c.isdigit() for c in name):
+        raise HTTPException(400, "Name must contain a number")
+    try:
+        fdb = _fb_db()
+        fdb.reference(f"duration_presets/{name}").set(True)
+        return {"detail": "created", "name": name}
+    except Exception as e:
+        raise HTTPException(503, f"Firebase error: {e}")
+
+@router.delete("/backup-times/{name}")
+def delete_backup_time(name: str, _=Depends(get_expert_user)):
+    try:
+        fdb = _fb_db()
+        ref = fdb.reference(f"duration_presets/{name}")
+        if ref.get() is None:
+            raise HTTPException(404, f"Preset '{name}' not found")
+        ref.delete()
+        return {"detail": "deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"Firebase error: {e}")

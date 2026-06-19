@@ -34,3 +34,20 @@ def get_admin_user(user: dict = Depends(get_current_user)) -> dict:
     if user.get("username") not in admin_usernames:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def get_expert_user(user: dict = Depends(get_current_user)) -> dict:
+    from config import settings
+    admin_usernames = {u.strip() for u in settings.ADMIN_USERNAME.split(",")}
+    if user.get("username") in admin_usernames:
+        return user
+    try:
+        from firebase_init import get_db
+        db = get_db()
+        data = db.reference(f"allowed_users/{user.get('username', '')}").get()
+        role = data.get("role", "u") if isinstance(data, dict) else "u"
+    except Exception:
+        role = "u"
+    if role != "e":
+        raise HTTPException(status_code=403, detail="Expert access required")
+    return user

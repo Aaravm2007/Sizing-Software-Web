@@ -493,6 +493,26 @@ def clear_tree(user=Depends(get_current_user)):
     return {"detail": "cleared"}
 
 
+@router.post("/tree/{row_index}/duplicate", status_code=201)
+def duplicate_row(row_index: int, user=Depends(get_current_user)):
+    db = get_user_costing_db(user["username"])
+    _ensure_tree(db)
+    conn = _get_conn(db)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tree LIMIT -1 OFFSET ?", (row_index,))
+    row = cur.fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(404, "Row not found")
+    quoted = [f'"{c}"' for c in COLUMNS]
+    placeholders = ",".join(["?"] * len(COLUMNS))
+    vals = [row[i] for i in range(len(COLUMNS))]
+    conn.execute(f'INSERT INTO tree ({",".join(quoted)}) VALUES ({placeholders})', vals)
+    conn.commit()
+    conn.close()
+    return {"detail": "duplicated"}
+
+
 @router.post("/tree/{row_index}/save-to-firebase")
 def save_to_firebase(row_index: int, user=Depends(get_current_user)):
     db = get_user_costing_db(user["username"])

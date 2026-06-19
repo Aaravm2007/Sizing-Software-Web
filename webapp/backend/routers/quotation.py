@@ -524,6 +524,7 @@ class UpdateItemReq(BaseModel):
     centre_tapping: Optional[str] = None
     batterypartcode: Optional[str] = None
     backup_time: Optional[str] = None
+    quantity: Optional[int] = None
     quote_price: Optional[float] = None
     system_text: Optional[str] = None
     solution_text: Optional[str] = None

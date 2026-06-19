@@ -222,6 +222,7 @@ export default function QuoteEditorPage() {
   const openEdit = (item: QuoteItem, sn: number | null) => {
     setEditItem(item);
     setEditFields({
+      quantity: String(item.quantity ?? 1),
       system_text: item.system_text || composeSystem(item),
       solution_text: item.solution_text || composeSolution(item, sn),
     });
@@ -512,6 +513,16 @@ export default function QuoteEditorPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>Edit Item</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-4 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quantity</Label>
+              <input
+                type="number"
+                min={1}
+                className="w-24 rounded-md border px-3 py-2 text-sm bg-background"
+                value={editFields.quantity ?? "1"}
+                onChange={e => setEditFields(f => ({ ...f, quantity: e.target.value }))}
+              />
+            </div>
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</Label>
               <textarea

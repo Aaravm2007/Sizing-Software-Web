@@ -178,7 +178,7 @@ export default function WizardComparePage() {
       const out = runCalculation({
         actualKw: n(col.actual_load_kw), actualKva: n(col.actual_load_kva),
         upsKva: n(col.ups_rating_kva), powerFactor: n(col.power_factor),
-        inverterEfficiency: n(col.inverter_efficiency),
+        inverterEfficiency: n(col.inverter_efficiency) / 100,
         nominalDcVoltage: n(col.nominal_dc_voltage),
         backupRequirementMin: n(col.backup_requirement_min),
         ageingPct: col.ageing_type === "BOL" ? 0 : n(col.ageing_percent),
@@ -637,7 +637,7 @@ export default function WizardComparePage() {
                 ["Actual Load (KVA)",   "actual_load_kva",        "number"],
                 ["Actual Load (kW)",    "actual_load_kw",         "number"],
                 ["Power Factor",        "power_factor",           "number"],
-                ["Inverter Efficiency", "inverter_efficiency",    "number"],
+                ["Inverter Efficiency (%)", "inverter_efficiency",    "number"],
                 ["Backup Req. (min)",   "backup_requirement_min", "number"],
               ] as const).map(([lbl, key, type]) => (
                 <tr key={key}>
@@ -814,6 +814,7 @@ export default function WizardComparePage() {
 
               {costingDone && (() => {
                 const FIELDS: [string, string][] = [
+                  ["Part Code",                   "partcode"],
                   ["Duration",                    "duration"],
                   ["Battery Pack",                "battery_pack"],
                   ["Dollar Rate (INR/USD)",        "dollar_rate"],
@@ -869,7 +870,6 @@ export default function WizardComparePage() {
                   ["Mount",                       "mount"],
                   ["Brand",                       "brand"],
                   ["Installation",                "installation"],
-                  ["Part Code",                   "partcode"],
                 ];
                 return (
                   <>

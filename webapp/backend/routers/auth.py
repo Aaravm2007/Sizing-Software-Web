@@ -58,6 +58,9 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+class VerifyPasswordRequest(BaseModel):
+    password: str
+
 class RegisterRequest(BaseModel):
     username: str
     password: str
@@ -111,6 +114,19 @@ def _exchange_google_token(id_token: str) -> dict:
 def me(user: dict = Depends(get_current_user)):
     username = user.get("username", "")
     return {"username": username, "role": _get_role(username)}
+
+
+@router.post("/verify-password")
+def verify_password_endpoint(body: VerifyPasswordRequest, user: dict = Depends(get_current_user)):
+    username = user.get("username", "")
+    if username == ADMIN_USER:
+        if body.password != ADMIN_PASS:
+            raise HTTPException(status_code=401, detail="Incorrect password")
+        return {"ok": True}
+    user_data = _firebase_user(username)
+    if not isinstance(user_data, dict) or not _verify_password(body.password, user_data.get("password", "")):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+    return {"ok": True}
 
 
 @router.post("/login", response_model=TokenResponse)

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
+import { useMe } from "@/lib/use-me";
 import AddToGroupDialog from "@/components/AddToGroupDialog";
 import SubmitApprovalDialog, { type ApprovalItem } from "@/components/SubmitApprovalDialog";
 import { type LocalGroupItem } from "@/lib/local-groups";
@@ -91,6 +92,7 @@ const MONEY_FIELDS = new Set<keyof CostingRow>([
 ]);
 
 const ROW_LABELS: [keyof CostingRow, string][] = [
+  ["partcode", "Battery Partcode"],
   ["duration", "Duration"],
   ["battery_pack", "Battery Pack"],
   ["dollar_rate", "Dollar Rate (INR/USD)"],
@@ -146,17 +148,21 @@ const ROW_LABELS: [keyof CostingRow, string][] = [
   ["mount", "Mount"],
   ["brand", "Brand & Type of Cell"],
   ["installation", "Installation"],
-  ["partcode", "Battery Partcode"],
 ];
 
 export default function CostingPage() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { isExpert } = useMe();
 
   const [batteryConfig, setBatteryConfig] = useState("");
   const [duration, setDuration] = useState("");
   const [selectedCol, setSelectedCol] = useState<number | null>(null);
   const [actionOpen, setActionOpen] = useState(false);
+  const [pwDialogOpen, setPwDialogOpen] = useState(false);
+  const [pwValue, setPwValue] = useState("");
+  const [pwPending, setPwPending] = useState(false);
+  const [pendingSaveIdx, setPendingSaveIdx] = useState<number | null>(null);
 
   const [fromSizing, setFromSizing] = useState(false);
   const [backUrl, setBackUrl] = useState("");
@@ -224,8 +230,33 @@ export default function CostingPage() {
 
   const saveFbMut = useMutation({
     mutationFn: (idx: number) => api.post(`/api/costing/tree/${idx}/save-to-firebase`),
-    onSuccess: () => { toast.success("Saved to Firebase"); setActionOpen(false); },
+    onSuccess: () => { toast.success("Saved to Firebase"); setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); },
     onError: (e: any) => toast.error(apiErr(e, "Save failed")),
+  });
+
+  const handleSaveClick = (idx: number) => {
+    setPendingSaveIdx(idx);
+    setPwValue("");
+    setPwDialogOpen(true);
+  };
+
+  const handlePwConfirm = async () => {
+    if (!pwValue || pendingSaveIdx === null) return;
+    setPwPending(true);
+    try {
+      await api.post("/api/auth/verify-password", { password: pwValue });
+      saveFbMut.mutate(pendingSaveIdx);
+    } catch {
+      toast.error("Incorrect password");
+    } finally {
+      setPwPending(false);
+    }
+  };
+
+  const duplicateMut = useMutation({
+    mutationFn: (idx: number) => api.post(`/api/costing/tree/${idx}/duplicate`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["costing-tree"] }); setActionOpen(false); toast.success("Option duplicated"); },
+    onError: (e: any) => toast.error(apiErr(e, "Duplicate failed")),
   });
 
   const clearMut = useMutation({
@@ -326,7 +357,10 @@ export default function CostingPage() {
         <Button onClick={handleSearch} disabled={searchMut.isPending}>
           Search &amp; Add
         </Button>
-        <Button variant="outline" onClick={() => router.push("/dashboard/costing/new")}>
+        <Button variant="outline" onClick={() => {
+          const qs = fromSizing ? `?from=sizing&back=${encodeURIComponent(backUrl)}` : "";
+          router.push(`/dashboard/costing/new${qs}`);
+        }}>
           New Costing
         </Button>
         <Button variant="outline" onClick={() => router.push("/dashboard/costing/mass-update")}>
@@ -353,6 +387,16 @@ export default function CostingPage() {
               data: { rows: treeRes.data } });
           } catch { toast.error("Failed to collect costing data"); }
         }}>Submit for Approval</Button>
+        {isExpert && (
+          <Button
+            variant="outline"
+            onClick={() => selectedCol !== null && handleSaveClick(selectedCol)}
+            disabled={selectedCol === null || saveFbMut.isPending}
+            title={selectedCol === null ? "Select a column first" : `Save Option ${selectedCol + 1} to Database`}
+          >
+            {saveFbMut.isPending ? "Saving…" : selectedCol !== null ? `Save Option ${selectedCol + 1} to Database` : "Save to Database"}
+          </Button>
+        )}
         <Button variant="destructive" onClick={() => clearMut.mutate()} disabled={clearMut.isPending}>
           Clear Table
         </Button>
@@ -390,8 +434,8 @@ export default function CostingPage() {
             </thead>
             <tbody>
               {ROW_LABELS.map(([key, label], rowIdx) => {
-                const highlight = [18, 22, 35, 39].includes(rowIdx + 1);
-                const highlightGreen = [3, 4, 5, 56].includes(rowIdx + 1);
+                const highlight = [19, 23, 36, 40].includes(rowIdx + 1);
+                const highlightGreen = [1, 4, 5, 6].includes(rowIdx + 1);
                 const rowBg = highlight ? "bg-yellow-100 dark:bg-yellow-900/40" : highlightGreen ? "bg-green-100 dark:bg-green-900/40" : "";
                 const rowText = highlight ? "text-red-600" : highlightGreen ? "text-green-900 dark:text-green-200" : "";
                 return (
@@ -429,6 +473,29 @@ export default function CostingPage() {
         <SubmitApprovalDialog open={!!approvalItem} item={approvalItem} onClose={() => setApprovalItem(null)} />
       )}
 
+      <Dialog open={pwDialogOpen} onOpenChange={(o) => { if (!o) { setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); } }}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader><DialogTitle>Confirm Password</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <p className="text-sm text-muted-foreground">Enter your password to save Option {pendingSaveIdx !== null ? pendingSaveIdx + 1 : ""} to the database.</p>
+            <Input
+              type="password"
+              placeholder="Password"
+              value={pwValue}
+              onChange={(e) => setPwValue(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handlePwConfirm()}
+              autoFocus
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => { setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); }}>Cancel</Button>
+            <Button onClick={handlePwConfirm} disabled={!pwValue || pwPending || saveFbMut.isPending}>
+              {pwPending || saveFbMut.isPending ? "Saving…" : "Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={actionOpen} onOpenChange={setActionOpen}>
         <DialogContent className="sm:max-w-xs">
           <DialogHeader>
@@ -437,7 +504,7 @@ export default function CostingPage() {
           <div className="flex flex-col gap-3 py-2">
             {fromSizing && selectedCol !== null && (
               <Button
-                variant="secondary"
+                className="bg-green-600 hover:bg-green-700 text-white"
                 onClick={async () => {
                   const row = rows[selectedCol];
                   if (!row) return;
@@ -466,19 +533,21 @@ export default function CostingPage() {
               </Button>
             )}
             <Button
-              onClick={() => selectedCol !== null && saveFbMut.mutate(selectedCol)}
-              disabled={saveFbMut.isPending}
-            >
-              Save to Database (Firebase)
-            </Button>
-            <Button
               variant="outline"
               onClick={() => {
                 setActionOpen(false);
-                router.push(`/dashboard/costing/new?edit=${selectedCol}`);
+                const sizingQs = fromSizing ? `&from=sizing&back=${encodeURIComponent(backUrl)}` : "";
+                router.push(`/dashboard/costing/new?edit=${selectedCol}${sizingQs}`);
               }}
             >
               Edit Option
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => selectedCol !== null && duplicateMut.mutate(selectedCol)}
+              disabled={duplicateMut.isPending}
+            >
+              Duplicate Option
             </Button>
             <Button
               variant="destructive"
