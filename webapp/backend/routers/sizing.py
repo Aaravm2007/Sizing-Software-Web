@@ -306,7 +306,7 @@ def _sizing_row_to_data(row) -> dict:
         "Max Charging Voltage (V)": nv(row[19]), "End Cell Voltage (V)": nv(end_v),
         "Energy Required (kWh)": nv(energy_kwh),
         "Capacity Required_Base (Ah)": base_cap,
-        "Capacity Required (Ah)": nv(row[22]),
+        "Capacity Required (Ah)": nv(row[23]),
         "Cap req w/ Design Margin (Ah)": nv(row[24]),
         "Cap req w/ DOD (Ah)": nv(row[25]),
         "Cap req w/ Derating (Ah)": nv(row[26]),
