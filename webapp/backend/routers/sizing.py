@@ -253,7 +253,7 @@ SIZING_CELL_MAP = {
     "Customer Name": "C4", "Solution Provider": "C5",
     "Date": "H3",
     "UPS Make": "A8", "UPS Model": "B8",
-    "UPS Rating (KVA)": "C8", "Actual Load (KVA)": "D8",
+    "UPS Rating (KVA)": "C8",
     "Power Factor": "E8", "Inverter Efficiency": "F8",
     "Nominal DC Voltage (V)": "G8", "Backup Requirement (Min)": "H8",
     "Cell Chemistry": "E11", "Calculated Load (kW)": "E12",
@@ -271,36 +271,46 @@ SIZING_CELL_MAP = {
 
 def _sizing_row_to_data(row) -> dict:
     from datetime import datetime as _dt
+    nv = lambda v: v if v else ""
     end_v      = row[20] or 0
     energy_kwh = row[21] or 0
-    base_cap   = round((energy_kwh * 1000) / end_v, 1) if end_v > 0 else 0
+    base_cap   = round((energy_kwh * 1000) / end_v, 1) if end_v > 0 else ""
     ageing     = row[12] or 0
     design     = row[13] or 0
     dod        = row[14] or 0
     derating   = row[15] or 0
+    kva = row[6] or 0
+    kw  = row[7] or 0
+    if kw:
+        load_label, load_value = "Actual Load (kW)", kw
+    elif kva:
+        load_label, load_value = "Actual Load (KVA)", kva
+    else:
+        load_label, load_value = "Actual Load", ""
     return {
+        "_load_label": load_label, "_load_value": load_value,
         "Date": "Date: " + _dt.now().strftime("%d/%m/%Y"),
         "Customer Name": row[1], "Solution Provider": row[2],
         "UPS Make": row[3], "UPS Model": row[4],
-        "UPS Rating (KVA)": row[5], "Actual Load (KVA)": row[6],
-        "Power Factor": row[8], "Inverter Efficiency": row[9],
-        "Nominal DC Voltage (V)": row[10], "Backup Requirement (Min)": row[11],
-        "Ageing (%)": ageing / 100.0 if ageing else 0,
-        "Design Margin (%)": design / 100.0 if design else 0,
-        "DOD Margin (%)": dod / 100.0 if dod else 1.0,
-        "Derating Factor (%)": derating / 100.0 if derating else 0,
-        "Cell Chemistry": row[17], "Calculated Load (kW)": row[18],
-        "Max Charging Voltage (V)": row[19], "End Cell Voltage (V)": end_v,
-        "Energy Required (kWh)": energy_kwh,
+        "UPS Rating (KVA)": nv(row[5]),
+        "Power Factor": nv(row[8]), "Inverter Efficiency": nv(row[9]),
+        "Nominal DC Voltage (V)": nv(row[10]), "Backup Requirement (Min)": nv(row[11]),
+        "Ageing (%)": ageing / 100.0 if ageing else "",
+        "Design Margin (%)": design / 100.0 if design else "",
+        "DOD Margin (%)": dod / 100.0 if dod else "",
+        "Derating Factor (%)": derating / 100.0 if derating else "",
+        "Cell Chemistry": row[17], "Calculated Load (kW)": nv(row[18]),
+        "Max Charging Voltage (V)": nv(row[19]), "End Cell Voltage (V)": nv(end_v),
+        "Energy Required (kWh)": nv(energy_kwh),
         "Capacity Required_Base (Ah)": base_cap,
-        "Capacity Required (Ah)": row[22],
-        "Cap req w/ Design Margin (Ah)": row[24],
-        "Cap req w/ DOD (Ah)": row[25],
-        "Cap req w/ Derating (Ah)": row[26],
-        "Nearest Available Capacity (Ah)": row[27],
-        "Offered Battery Configuration": row[28],
-        "Total Available Energy (kWh)": row[29],
-        "Backup Time (Min)": row[30],
+        "Capacity Required (Ah)": nv(row[22]),
+        "Cap req w/ Design Margin (Ah)": nv(row[24]),
+        "Cap req w/ DOD (Ah)": nv(row[25]),
+        "Cap req w/ Derating (Ah)": nv(row[26]),
+        "Nearest Available Capacity (Ah)": nv(row[27]),
+        "Offered Battery Configuration": row[28] or "",
+        "Total Available Energy (kWh)": nv(row[29]),
+        "Backup Time (Min)": nv(row[30]),
     }
 
 
@@ -363,6 +373,8 @@ def _build_excel(name: str, sr_no: Optional[int], db_path: str = None) -> str:
         _copy_images(template_ws, ws)
         for key, cell_addr in SIZING_CELL_MAP.items():
             ws[cell_addr] = data.get(key, "")
+        ws["D7"] = data["_load_label"]
+        ws["D8"] = data["_load_value"]
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     out_wb.save(tmp.name)
@@ -385,6 +397,7 @@ class WizardCol(BaseModel):
     ups_model: str = ""
     ups_rating_kva: str = ""
     actual_load_kva: str = ""
+    actual_load_kw: str = ""
     power_factor: str = ""
     inverter_efficiency: str = ""
     nominal_dc_voltage: str = ""
@@ -433,33 +446,40 @@ def _build_wizard_excel(body: "WizardExportBody") -> str:
     from datetime import datetime as _dt
     from copy import copy as _copy
     for idx, col in enumerate(body.cols, 1):
+        w_kw  = num(col.actual_load_kw)
+        w_kva = num(col.actual_load_kva)
+        if w_kw:
+            w_load_label, w_load_value = "Actual Load (kW)", w_kw
+        elif w_kva:
+            w_load_label, w_load_value = "Actual Load (KVA)", w_kva
+        else:
+            w_load_label, w_load_value = "Actual Load", ""
         data = {
             "Date": "Date: " + _dt.now().strftime("%d/%m/%Y"),
             "Customer Name": body.customer_name,
             "Solution Provider": body.solution_provider,
             "UPS Make": col.ups_make,
             "UPS Model": col.ups_model,
-            "UPS Rating (KVA)": num(col.ups_rating_kva),
-            "Actual Load (KVA)": num(col.actual_load_kva),
-            "Power Factor": num(col.power_factor),
-            "Inverter Efficiency": num(col.inverter_efficiency),
-            "Nominal DC Voltage (V)": num(col.nominal_dc_voltage),
-            "Backup Requirement (Min)": num(col.backup_requirement_min),
+            "UPS Rating (KVA)": num(col.ups_rating_kva) or "",
+            "Power Factor": num(col.power_factor) or "",
+            "Inverter Efficiency": num(col.inverter_efficiency) or "",
+            "Nominal DC Voltage (V)": num(col.nominal_dc_voltage) or "",
+            "Backup Requirement (Min)": num(col.backup_requirement_min) or "",
             "Cell Chemistry": col.cell_type,
-            "Calculated Load (kW)": num(col.calculated_load_kw),
-            "Energy Required (kWh)": num(col.energy_required_kwh),
-            "Capacity Required_Base (Ah)": num(col.capacity_required_ah),
-            "Ageing (%)": pct(col.ageing_percent),
-            "Design Margin (%)": pct(col.design_margin_percent),
-            "DOD Margin (%)": pct(col.dod_margin_percent) or 1.0,
-            "Derating Factor (%)": pct(col.derating_factor_percent),
-            "Capacity Required (Ah)": num(col.cap_with_ageing_ah),
-            "Cap req w/ Design Margin (Ah)": num(col.cap_with_design_margin_ah),
-            "Cap req w/ DOD (Ah)": num(col.cap_with_dod_margin_ah),
-            "Cap req w/ Derating (Ah)": num(col.cap_with_derating_ah),
-            "Nearest Available Capacity (Ah)": num(col.nearest_capacity_ah),
+            "Calculated Load (kW)": num(col.calculated_load_kw) or "",
+            "Energy Required (kWh)": num(col.energy_required_kwh) or "",
+            "Capacity Required_Base (Ah)": num(col.capacity_required_ah) or "",
+            "Ageing (%)": pct(col.ageing_percent) or "",
+            "Design Margin (%)": pct(col.design_margin_percent) or "",
+            "DOD Margin (%)": pct(col.dod_margin_percent) or "",
+            "Derating Factor (%)": pct(col.derating_factor_percent) or "",
+            "Capacity Required (Ah)": num(col.cap_with_ageing_ah) or "",
+            "Cap req w/ Design Margin (Ah)": num(col.cap_with_design_margin_ah) or "",
+            "Cap req w/ DOD (Ah)": num(col.cap_with_dod_margin_ah) or "",
+            "Cap req w/ Derating (Ah)": num(col.cap_with_derating_ah) or "",
+            "Nearest Available Capacity (Ah)": num(col.nearest_capacity_ah) or "",
             "Offered Battery Configuration": col.offered_battery_config,
-            "Backup Time (Min)": num(col.backup_time_min),
+            "Backup Time (Min)": num(col.backup_time_min) or "",
         }
         ws = out_wb.create_sheet(title=f"Sizing {idx}")
         for c, dim in template_ws.column_dimensions.items():
@@ -483,6 +503,8 @@ def _build_wizard_excel(body: "WizardExportBody") -> str:
         for key, cell_addr in SIZING_CELL_MAP.items():
             if key in data:
                 ws[cell_addr] = data[key]
+        ws["D7"] = w_load_label
+        ws["D8"] = w_load_value
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     out_wb.save(tmp.name)

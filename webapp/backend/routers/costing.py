@@ -843,6 +843,24 @@ def preview_costing_range(body: PreviewRangeRequest, user=Depends(get_current_us
         except Exception:
             continue
 
+    # if the specific duration had no matches, retry across all durations
+    if inserted == 0 and search_durations != durations:
+        for duration in durations:
+            try:
+                products = fdb.reference(f"products/{duration}").get()
+                if not products:
+                    continue
+                items = products.items() if isinstance(products, dict) else enumerate(products)
+                for _, product in items:
+                    if not isinstance(product, dict):
+                        continue
+                    bp = str(product.get("Battery Pack", "")).lower()
+                    if any(cfg.lower() in bp for cfg in configs) and product.get("active"):
+                        conn.execute(insert_q, _product_values(duration, product))
+                        inserted += 1
+            except Exception:
+                continue
+
     conn.commit()
     conn.close()
     return {"loaded": inserted, "durations_searched": len(search_durations), "configs": configs}
