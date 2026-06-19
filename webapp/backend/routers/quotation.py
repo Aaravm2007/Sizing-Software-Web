@@ -102,10 +102,12 @@ def _row_to_dict(row: tuple) -> dict:
     keys = ["code","format","date","solution_provider","customer_name",
             "sr_no","sol_no","ups_rating","backup_requirement","calc_load",
             "celltype","centre_tapping","batterypartcode","backup_time",
-            "quantity","quote_price","modular_rack","system_text","solution_text"]
+            "quantity","quote_price","modular_rack","system_text","solution_text",
+            "calc_load_unit"]
     d = dict(zip(keys, row))
     d.setdefault("system_text", None)
     d.setdefault("solution_text", None)
+    d.setdefault("calc_load_unit", "kW")
     return d
 
 
@@ -289,7 +291,7 @@ def add_item(code: str, body: QuoteItem, user=Depends(get_current_user)):
             body.customer_name, body.sr_no, body.sol_no, body.ups_rating,
             body.backup_requirement, body.calc_load, body.celltype,
             body.centre_tapping, body.batterypartcode, body.backup_time,
-            body.quantity, body.quote_price, body.modular_rack, tdb,
+            body.quantity, body.quote_price, body.modular_rack, db_path=tdb,
         )
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -318,7 +320,7 @@ def delete_item(code: str, sr_no: int, user=Depends(get_current_user)):
             d["customer_name"], new_sr, d["sol_no"], d["ups_rating"],
             d["backup_requirement"], d["calc_load"], d["celltype"],
             d["centre_tapping"], d["batterypartcode"], d["backup_time"],
-            d["quantity"], d["quote_price"], d["modular_rack"], tdb,
+            d["quantity"], d["quote_price"], d["modular_rack"], db_path=tdb,
         )
     return {"detail": "deleted"}
 
@@ -382,7 +384,7 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
         code, q_code, q_fmt, q_date, q_provider, q_customer,
         sr_no, sol_no, "-", str(backup_time), "-",
         str(celltype), str(centre_tapping), str(batterypartcode),
-        str(backup_time), body.quantity, quote_price, "-", tdb,
+        str(backup_time), body.quantity, quote_price, "-", db_path=tdb,
     )
     return {"detail": "added", "sr_no": sr_no, "quote_price": quote_price}
 
@@ -472,7 +474,7 @@ def add_modular(code: str, body: AddModularReq, user=Depends(get_current_user)):
     add_product_quote(
         code, q_code, q_fmt, q_date, q_provider, q_customer,
         sr_no, "-", "-", "-", "-", "-", "-", "-", "-",
-        body.quantity, price, body.rack_key, tdb,
+        body.quantity, price, body.rack_key, db_path=tdb,
     )
     return {"detail": "added", "sr_no": sr_no, "quote_price": price}
 
@@ -538,7 +540,7 @@ def download_from_firebase(code: str, user=Depends(get_current_user)):
             item.get("calc_load", "-"), item.get("celltype", "-"),
             item.get("centre_tapping", "-"), item.get("batterypartcode", "-"),
             item.get("backup_time", "0"), item.get("quantity", 1),
-            item.get("quote_price", 0), item.get("modular_rack", "-"), tdb,
+            item.get("quote_price", 0), item.get("modular_rack", "-"), db_path=tdb,
         )
     return {"code": q_code}
 
@@ -703,7 +705,7 @@ def restore_quote(body: RestoreQuoteReq, user=Depends(get_current_user)):
                 item.sr_no, item.sol_no, item.ups_rating,
                 item.backup_requirement, item.calc_load, item.celltype,
                 item.centre_tapping, item.batterypartcode, item.backup_time,
-                item.quantity, item.quote_price, item.modular_rack, tdb,
+                item.quantity, item.quote_price, item.modular_rack, db_path=tdb,
             )
     except Exception as e:
         raise HTTPException(500, str(e))
