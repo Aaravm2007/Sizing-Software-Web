@@ -8,7 +8,7 @@ import { runCalculation } from "@/lib/sizingEngine";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Clipboard, Calculator, Trash2, ChevronDown, ChevronRight, Download, Plus, X } from "lucide-react";
+import { Clipboard, Calculator, ChevronDown, ChevronRight, Download, Plus, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import { cn } from "@/lib/utils";
 import {
@@ -54,6 +54,7 @@ interface ColState {
   backup_time_min: string;
   costing_rows: any[];
   costing_loading: boolean;
+  in_quote: boolean;
 }
 
 const EMPTY_COL = (): ColState => ({
@@ -73,6 +74,7 @@ const EMPTY_COL = (): ColState => ({
   nearest_capacity_ah: "", offered_battery_config: "",
   backup_time_min: "",
   costing_rows: [], costing_loading: false,
+  in_quote: false,
 });
 
 function n(v: string) { return parseFloat(v) || 0; }
@@ -113,12 +115,9 @@ export default function WizardComparePage() {
   const [priceOption,    setPriceOption]    = useState<PriceOption>("B");
   const [customPct,      setCustomPct]      = useState("30");
   const [quantity,       setQuantity]       = useState("1");
-  // per-column quote item (populated after successful add)
-  const [quoteItems,     setQuoteItems]     = useState<(any | null)[]>([]);
   // section collapse state
   const [showSizing,    setShowSizing]    = useState(true);
   const [showCosting,   setShowCosting]   = useState(true);
-  const [showQuotation, setShowQuotation] = useState(true);
 
   // ── load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -134,15 +133,25 @@ export default function WizardComparePage() {
       const loadedCols = data.cols?.length ? data.cols : Array.from({ length: proj.count }, EMPTY_COL);
       setCols(loadedCols);
       setResultIdx(Array.from({ length: loadedCols.length }, () => 0));
-      setSelectedCols(Array.from({ length: loadedCols.length }, () => false));
-      setQuoteItems(Array.from({ length: loadedCols.length }, () => null));
+      setSelectedCols(loadedCols.map((c: ColState) => c.in_quote ?? false));
       setCalcDone(data.calc_done || false);
       setCostingDone(data.costing_done || false);
+      if (data.quote_code) {
+        setQuoteCode(data.quote_code);
+        // verify quote still exists; if deleted, clear all in_quote flags
+        api.get("/api/quotation/quotes").then(res => {
+          const exists = (res.data as any[]).some(q => q.code === data.quote_code);
+          if (!exists) {
+            setQuoteCode("");
+            setCols(prev => prev.map(c => ({ ...c, in_quote: false })));
+            setSelectedCols(prev => prev.map(() => false));
+          }
+        }).catch(() => {});
+      }
     } else {
       setCols(Array.from({ length: proj.count }, EMPTY_COL));
       setResultIdx(Array.from({ length: proj.count }, () => 0));
       setSelectedCols(Array.from({ length: proj.count }, () => false));
-      setQuoteItems(Array.from({ length: proj.count }, () => null));
     }
   }, [id]);
 
@@ -151,9 +160,9 @@ export default function WizardComparePage() {
     if (!cols.length) return;
     localStorage.setItem(`wizard_data_${id}`, JSON.stringify({
       customer_name: customerName, solution_provider: solutionProvider,
-      cols, calc_done: calcDone, costing_done: costingDone,
+      cols, calc_done: calcDone, costing_done: costingDone, quote_code: quoteCode,
     }));
-  }, [customerName, solutionProvider, cols, calcDone, costingDone, id]);
+  }, [customerName, solutionProvider, cols, calcDone, costingDone, quoteCode, id]);
 
   // ── helpers ───────────────────────────────────────────────────────────────
   const updateCol = (i: number, patch: Partial<ColState>) =>
@@ -254,6 +263,7 @@ export default function WizardComparePage() {
   // ── checkbox handler ─────────────────────────────────────────────────────
   const handleCheck = async (i: number, checked: boolean) => {
     if (!checked) {
+      if (cols[i]?.in_quote) return; // stays checked until quote is deleted
       setSelectedCols(prev => { const a = [...prev]; a[i] = false; return a; });
       return;
     }
@@ -262,7 +272,7 @@ export default function WizardComparePage() {
     if (!quoteCode) {
       // first sizing checked — need quote format
       try {
-        const res = await api.get("/api/quotation/next-code?scope=wizard");
+        const res = await api.get("/api/quotation/next-code");
         setQCode(res.data.code || "");
       } catch { setQCode(""); }
       setQuoteDialog("format");
@@ -274,7 +284,7 @@ export default function WizardComparePage() {
   const handleCreateQuote = async () => {
     if (!qCode.trim()) { toast.error("Quote code required"); return; }
     try {
-      await api.post("/api/quotation/quotes?scope=wizard", {
+      await api.post("/api/quotation/quotes", {
         code: qCode.trim(), date: qDate,
         customer_name: customerName, solution_provider: solutionProvider,
         sales_person: qSalesPerson,
@@ -299,7 +309,7 @@ export default function WizardComparePage() {
       const ups_rating = uKva > 0 ? String(uKva) : "-";
       const calc_load  = aKva > 0 ? String(aKva) : aKw > 0 ? String(aKw) : "";
 
-      const res = await api.post(`/api/quotation/quotes/${quoteCode}/add-from-sizing-screen?scope=wizard`, {
+      const res = await api.post(`/api/quotation/quotes/${quoteCode}/add-from-sizing-screen`, {
         battery_config:    col.offered_battery_config,
         duration:          row?.duration || col.backup_requirement_min,
         kw_calculation:    cKw,
@@ -315,23 +325,10 @@ export default function WizardComparePage() {
         ups_rating_kva:    uKva,
         calculated_load_kw: cKw,
       });
-      const qi = {
-        sr_no:          res.data.sr_no,
-        quote_price:    res.data.quote_price,
-        quantity:       parseInt(quantity) || 1,
-        price_option:   priceOption,
-        battery_config: col.offered_battery_config,
-        backup_time:    row?.duration || col.backup_requirement_min,
-        centre_tap:     row?.centre_tap || col.centre_tap,
-        cell_type:      row?.cell_type || col.cell_type,
-        partcode:       row?.partcode || "",
-        brand:          row?.brand || "",
-        ups_rating,
-        calc_load,
-      };
-      setQuoteItems(prev => { const a = [...prev]; a[pendingCol!] = qi; return a; });
-      toast.success(`Sizing ${pendingCol + 1} added to quote ${quoteCode} (Sr ${res.data.sr_no})`);
+      updateCol(pendingCol, { in_quote: true });
+      toast.success(`Sizing ${pendingCol + 1} added to quote ${quoteCode} (Sr ${res.data.sr_no}) — view in Quotations`);
     } catch (e: any) {
+      setSelectedCols(prev => { const a = [...prev]; a[pendingCol] = false; return a; });
       toast.error(apiErr(e, "Failed to add to quote"));
     }
     setQuoteDialog(null);
@@ -401,45 +398,10 @@ export default function WizardComparePage() {
   const handleExportCosting    = () => _doExportCosting("xlsx");
   const handleExportCostingPdf = () => _doExportCosting("pdf");
 
-  // ── export quotation ──────────────────────────────────────────────────────
-  const handleExportQuotation = async (fmt: "word" | "pdf") => {
-    if (!quoteCode) { toast.warning("No active quote to export"); return; }
-    try {
-      const res = await api.get(
-        `/api/quotation/quotes/${quoteCode}/export/${fmt}?scope=wizard`,
-        { responseType: "blob" }
-      );
-      const ext = fmt === "word" ? "docx" : "pdf";
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Quote_${quoteCode}.${ext}`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-      const items = quoteItems.filter(Boolean);
-      api.post("/api/records", {
-        type: "quotation",
-        name: `${quoteCode} — ${customerName}`,
-        customer: customerName,
-        data: {
-          code: quoteCode,
-          date: qDate,
-          customer_name: customerName,
-          solution_provider: solutionProvider,
-          format: qFormat,
-          items,
-        },
-      }).catch(() => {});
-    } catch (e: any) {
-      toast.error(apiErr(e, "Export failed"));
-    }
-  };
-
   const handleAddCol = () => {
     setCols(prev => [...prev, EMPTY_COL()]);
     setSelectedCols(prev => [...prev, false]);
     setResultIdx(prev => [...prev, 0]);
-    setQuoteItems(prev => [...prev, null]);
   };
 
   const handleDeleteCol = (i: number) => {
@@ -447,22 +409,8 @@ export default function WizardComparePage() {
     setCols(prev => prev.filter((_, idx) => idx !== i));
     setSelectedCols(prev => prev.filter((_, idx) => idx !== i));
     setResultIdx(prev => prev.filter((_, idx) => idx !== i));
-    setQuoteItems(prev => prev.filter((_, idx) => idx !== i));
     if (clipSource === i) setClipSource(null);
     else if (clipSource !== null && clipSource > i) setClipSource(clipSource - 1);
-  };
-
-  const handleClearQuote = async () => {
-    if (!quoteCode) { setSelectedCols(prev => prev.map(() => false)); return; }
-    try {
-      await api.delete(`/api/quotation/quotes/${quoteCode}?scope=wizard`);
-      toast.success(`Quote ${quoteCode} deleted`);
-    } catch (e: any) {
-      toast.error(apiErr(e, "Failed to delete quote"));
-    }
-    setQuoteCode("");
-    setSelectedCols(prev => prev.map(() => false));
-    setQuoteItems(prev => prev.map(() => null));
   };
 
   if (!cols.length) return <div className="p-5 text-muted-foreground">Loading…</div>;
@@ -486,9 +434,12 @@ export default function WizardComparePage() {
           </>
         )}
         {quoteCode && (
-          <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 px-2 py-1 rounded font-medium">
-            Quote: {quoteCode}
-          </span>
+          <button
+            className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 px-2 py-1 rounded font-medium hover:bg-amber-200 dark:hover:bg-amber-800/50"
+            onClick={() => router.push("/dashboard/quote")}
+          >
+            Quote: {quoteCode} → View
+          </button>
         )}
         <Button size="sm" onClick={handleSize}>Size All</Button>
         {calcDone && showSizing && (
@@ -945,90 +896,6 @@ export default function WizardComparePage() {
           </tbody>
         </table>
       </div>
-
-      {/* ── Quotation panel — below scroll, visible when quote active or items added ── */}
-      {(quoteCode || quoteItems.some(q => q !== null)) && (
-        <div className="border-t bg-background shrink-0">
-          {/* collapsible header with Clear Quote */}
-          <div
-            className="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-muted/30 select-none"
-            onClick={() => setShowQuotation(v => !v)}
-          >
-            <div className="flex items-center gap-1.5 text-sm font-bold">
-              {showQuotation
-                ? <ChevronDown className="h-4 w-4" />
-                : <ChevronRight className="h-4 w-4" />}
-              Quotation{quoteCode ? ` — ${quoteCode}` : ""}
-            </div>
-            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-              {quoteCode && quoteItems.some(q => q !== null) && (
-                <>
-                  <Button size="sm" variant="outline" className="gap-1.5"
-                    onClick={() => handleExportQuotation("word")}>
-                    <Download className="h-3.5 w-3.5" />
-                    Word
-                  </Button>
-                  <Button size="sm" variant="outline" className="gap-1.5"
-                    onClick={() => handleExportQuotation("pdf")}>
-                    <Download className="h-3.5 w-3.5" />
-                    PDF
-                  </Button>
-                </>
-              )}
-              <Button
-                size="sm"
-                variant="destructive"
-                className="gap-1.5"
-                onClick={handleClearQuote}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Clear Quote
-              </Button>
-            </div>
-          </div>
-
-          {/* cards */}
-          {showQuotation && quoteItems.some(q => q !== null) && (
-            <div className="overflow-y-auto max-h-64 px-4 pb-3">
-              <div className="flex flex-col gap-2">
-                {quoteItems.map((qi, ci) => {
-                  if (!qi) return null;
-                  const price = parseFloat(String(qi.quote_price)) || 0;
-                  const total = price * (parseInt(String(qi.quantity)) || 1);
-                  return (
-                    <div key={ci}
-                      className="border rounded-md p-4 grid grid-cols-[40px_1fr_1fr_100px_160px_160px] gap-3 text-sm items-start">
-                      <div className="font-bold text-lg text-center">{qi.sr_no}</div>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xs text-muted-foreground uppercase font-medium">System</span>
-                        <span className="whitespace-pre-line">{`${qi.ups_rating}KVA : ${qi.backup_time}Min Backup${qi.calc_load ? `\n(Load: ${qi.calc_load}kW)` : ""}\n(Cell Type: ${qi.cell_type})\n(${qi.centre_tap})`}</span>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xs text-muted-foreground uppercase font-medium">Solution</span>
-                        <span className="whitespace-pre-line">{`Solution${ci + 1}: Lithium Battery Pack\n(${qi.partcode || qi.battery_config}) with\nApprox Backup: ${qi.backup_time}Mins At BOL\nWith Cabinet and inbuilt BMS`}</span>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xs text-muted-foreground uppercase font-medium">Quantity</span>
-                        <span>{qi.quantity}</span>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xs text-muted-foreground uppercase font-medium">Unit Price</span>
-                        <span>Rs. {price.toLocaleString("en-IN")}/- +GST</span>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xs text-muted-foreground uppercase font-medium">Total</span>
-                        <span className="font-semibold text-green-700 dark:text-green-400">
-                          Rs. {total.toLocaleString("en-IN")}/- +GST
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ── Dialog 1: Quote format (first sizing checked) ── */}
       <Dialog open={quoteDialog === "format"} onOpenChange={open => { if (!open) { setQuoteDialog(null); setPendingCol(null); setSelectedCols(prev => { const a = [...prev]; if (pendingCol !== null) a[pendingCol] = false; return a; }); } }}>

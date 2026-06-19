@@ -509,16 +509,17 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
         calc_load_unit=calc_load_unit, item_type="system", db_path=tdb,
     )
 
-    if body.sizing_project and body.sizing_sr_no:
-        try:
-            import time as _time
-            from inquiry_db import push_row as _push_inq
-            _yr = _time.localtime().tm_year % 100
-            _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
+    try:
+        import time as _time, sqlite3 as _sq3, re as _re
+        from inquiry_db import push_row as _push_inq
+        _yr = _time.localtime().tm_year % 100
+        _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
+        unit_price = round(quote_price / body.quantity, 2) if body.quantity else quote_price
+
+        if body.sizing_project and body.sizing_sr_no:
             sdb = get_user_sizing_db(user["username"])
             srow = fetch_sizing_by_sr(body.sizing_project, body.sizing_sr_no, db_path=sdb)
             if srow:
-                unit_price = round(quote_price / body.quantity, 2) if body.quantity else quote_price
                 _push_inq({
                     "inquiry_date": q_date,
                     "type": _type, "sales_person": str(q_sales or ""),
@@ -545,8 +546,56 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                     "submission_date": "", "submitted_to": "",
                     "quote_code": code, "sol_no": str(sol_no),
                 })
-        except Exception:
-            pass
+        else:
+            # wizard flow — use body data + optional costing row lookup by partcode
+            _dc_volt = ""
+            _volt_m = _re.search(r'(\d+)\s*[Vv]', body.battery_config or "")
+            if _volt_m:
+                _dc_volt = _volt_m.group(1)
+            _crow: dict = {}
+            if body.partcode:
+                try:
+                    _cdb = get_user_costing_db(user["username"])
+                    _cconn = _sq3.connect(_cdb)
+                    _ccur = _cconn.cursor()
+                    _ccur.execute("PRAGMA table_info(tree)")
+                    _ccols = [r[1] for r in _ccur.fetchall()]
+                    _ccur.execute("SELECT * FROM tree WHERE partcode = ?", (body.partcode,))
+                    _crow_row = _ccur.fetchone()
+                    if _crow_row:
+                        _crow = dict(zip(_ccols, _crow_row))
+                    _cconn.close()
+                except Exception:
+                    pass
+            _push_inq({
+                "inquiry_date": q_date or _time.strftime("%d/%m/%Y"),
+                "type": _type, "sales_person": str(q_sales or ""),
+                "solution_provider": str(q_provider or ""),
+                "project_customer": str(q_customer or ""),
+                "ups_make": "", "ups_model": "",
+                "ups_kva": str(body.ups_rating_kva) if body.ups_rating_kva else "",
+                "actual_load_kva": str(body.actual_load_kva) if body.actual_load_kva else "",
+                "load_kw": str(body.actual_load_kw or body.calculated_load_kw or ""),
+                "power_factor": "", "inverter_efficiency": "",
+                "dc_voltage": _dc_volt,
+                "backup_min": str(backup_time) if backup_time else "",
+                "cell_chemistry": str(_crow.get("cell_chemistry", "") or "LFP"),
+                "ageing_pct": "", "design_margin_pct": "", "dod_margin_pct": "", "derating_pct": "",
+                "capacity_ah": str(_crow.get("ampere_capacity", "") or ""),
+                "centre_tap": str(body.centre_tap or ""), "cell_type": str(body.cell_type or ""),
+                "part_code": str(body.partcode or ""),
+                "qty_system": str(body.quantity), "rate_system": str(unit_price),
+                "price_system": str(quote_price),
+                "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
+                "custom_cost_desc": "", "custom_cost_price": "",
+                "datasheet": "NO", "sizing_sheet": "NO", "gad": "NO",
+                "battery_compliance": "NO", "warranty": "5 year",
+                "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
+                "submission_date": "", "submitted_to": "",
+                "quote_code": code, "sol_no": str(sol_no),
+            })
+    except Exception:
+        pass
 
     return {"detail": "added", "sr_no": sr_no, "quote_price": quote_price}
 
