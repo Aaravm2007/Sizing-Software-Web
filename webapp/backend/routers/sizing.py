@@ -387,10 +387,45 @@ def _build_excel(name: str, sr_no: Optional[int], db_path: str = None) -> str:
 
 @router.get("/projects/{name}/export/excel")
 def export_excel(name: str, sr_no: Optional[int] = None, user=Depends(get_current_user)):
+    sdb = get_user_sizing_db(user["username"])
     try:
-        path = _build_excel(name, sr_no, db_path=get_user_sizing_db(user["username"]))
+        path = _build_excel(name, sr_no, db_path=sdb)
     except Exception as e:
         raise HTTPException(500, str(e))
+
+    if sr_no:
+        try:
+            import time as _time
+            from inquiry_db import push_row as _push_inq
+            srow = fetch_sizing_by_sr(name, sr_no, db_path=sdb)
+            if srow:
+                _yr = _time.localtime().tm_year % 100
+                _push_inq({
+                    "inquiry_date": _time.strftime("%d/%m/%Y"),
+                    "type": "Sizing", "sales_person": "",
+                    "solution_provider": str(srow[2] or ""),
+                    "project_customer": str(srow[1] or ""),
+                    "ups_make": str(srow[3] or ""), "ups_model": str(srow[4] or ""),
+                    "ups_kva": str(srow[5] or ""),
+                    "actual_load_kva": str(srow[6] or ""), "load_kw": str(srow[7] or ""),
+                    "power_factor": str(srow[8] or ""), "inverter_efficiency": str(srow[9] or ""),
+                    "dc_voltage": str(srow[10] or ""), "backup_min": str(srow[11] or ""),
+                    "cell_chemistry": str(srow[17] or ""),
+                    "ageing_pct": str(srow[12] or ""), "design_margin_pct": str(srow[13] or ""),
+                    "dod_margin_pct": str(srow[14] or ""), "derating_pct": str(srow[15] or ""),
+                    "capacity_ah": str(srow[27] or ""),
+                    "centre_tap": "", "cell_type": "", "part_code": "",
+                    "qty_system": "", "rate_system": "", "price_system": "",
+                    "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
+                    "custom_cost_desc": "", "custom_cost_price": "",
+                    "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO",
+                    "battery_compliance": "NO", "warranty": "5 year",
+                    "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
+                    "submission_date": "", "submitted_to": "",
+                })
+        except Exception:
+            pass
+
     fname = f"{name}_sizing{'_'+str(sr_no) if sr_no else '_all'}.xlsx"
     return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         filename=fname, background=None)

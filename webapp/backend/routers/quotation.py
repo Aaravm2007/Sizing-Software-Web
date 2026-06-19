@@ -23,7 +23,8 @@ from tempquotebase import (
     get_highest_sr_no,
 )
 from auth import get_current_user
-from user_db import get_user_costing_db, get_user_temp_db, get_user_wizard_temp_db
+from user_db import get_user_costing_db, get_user_temp_db, get_user_wizard_temp_db, get_user_sizing_db
+from sql_handler import fetch_sizing_by_sr
 
 init_temp_db()
 router = APIRouter()
@@ -89,6 +90,8 @@ class AddFromCostingReq(BaseModel):
     price_option: str   # "A","B-5","B","B+5","C","C+5","custom"
     quantity: int
     custom_pct: float = 0.0  # used when price_option == "custom"
+    sizing_project: str = ""
+    sizing_sr_no: int = 0
 
 class AddModularReq(BaseModel):
     quote_code: str
@@ -103,7 +106,7 @@ def _row_to_dict(row: tuple) -> dict:
             "sr_no","sol_no","ups_rating","backup_requirement","calc_load",
             "celltype","centre_tapping","batterypartcode","backup_time",
             "quantity","quote_price","modular_rack","system_text","solution_text",
-            "calc_load_unit"]
+            "calc_load_unit","item_type"]
     d = dict(zip(keys, row))
     d.setdefault("system_text", None)
     d.setdefault("solution_text", None)
@@ -272,6 +275,13 @@ def remove_quote(code: str, user=Depends(get_current_user), scope: str = Query("
         delete_quote(code, tdb)
     except Exception as e:
         raise HTTPException(500, str(e))
+    try:
+        from inquiry_db import _conn as _inq_conn, init_inquiry_db as _inq_init
+        _inq_init()
+        with _inq_conn() as c:
+            c.execute('DELETE FROM inquiry WHERE quote_code = ?', (code,))
+    except Exception:
+        pass
     return {"detail": "deleted"}
 
 
@@ -320,8 +330,15 @@ def delete_item(code: str, sr_no: int, user=Depends(get_current_user)):
             d["customer_name"], new_sr, d["sol_no"], d["ups_rating"],
             d["backup_requirement"], d["calc_load"], d["celltype"],
             d["centre_tapping"], d["batterypartcode"], d["backup_time"],
-            d["quantity"], d["quote_price"], d["modular_rack"], db_path=tdb,
+            d["quantity"], d["quote_price"], d["modular_rack"],
+            item_type=d.get("item_type") or "system", db_path=tdb,
         )
+    try:
+        from inquiry_db import sync_inquiry_for_quote as _sync_inq
+        updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
+        _sync_inq(code, updated)
+    except Exception:
+        pass
     return {"detail": "deleted"}
 
 
@@ -374,7 +391,7 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
     meta = next((q for q in quotes if q[0] == code), None)
     if not meta:
         raise HTTPException(404, "Quote not found")
-    q_code, q_date, q_customer, q_provider, q_fmt, *_ = meta
+    q_code, q_date, q_customer, q_provider, q_fmt, *_rest = meta; q_sales = _rest[0] if _rest else ""
 
     sr_no = get_highest_sr_no(code, tdb) + 1
     all_items = get_all_quote_products(code, tdb)
@@ -384,8 +401,48 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
         code, q_code, q_fmt, q_date, q_provider, q_customer,
         sr_no, sol_no, "-", str(backup_time), "-",
         str(celltype), str(centre_tapping), str(batterypartcode),
-        str(backup_time), body.quantity, quote_price, "-", db_path=tdb,
+        str(backup_time), body.quantity, quote_price, "-", item_type="system", db_path=tdb,
     )
+
+    if body.sizing_project and body.sizing_sr_no:
+        try:
+            import time as _time
+            from inquiry_db import push_row as _push_inq
+            _yr = _time.localtime().tm_year % 100
+            _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
+            sdb = get_user_sizing_db(user["username"])
+            srow = fetch_sizing_by_sr(body.sizing_project, body.sizing_sr_no, db_path=sdb)
+            if srow:
+                unit_price = round(quote_price / body.quantity, 2) if body.quantity else quote_price
+                _push_inq({
+                    "inquiry_date": q_date,
+                    "type": _type, "sales_person": str(q_sales or ""),
+                    "solution_provider": str(q_provider or ""),
+                    "project_customer": str(q_customer or ""),
+                    "ups_make": str(srow[3] or ""), "ups_model": str(srow[4] or ""),
+                    "ups_kva": str(srow[5] or ""),
+                    "actual_load_kva": str(srow[6] or ""), "load_kw": str(srow[7] or ""),
+                    "power_factor": str(srow[8] or ""), "inverter_efficiency": str(srow[9] or ""),
+                    "dc_voltage": str(srow[10] or ""), "backup_min": str(srow[11] or ""),
+                    "cell_chemistry": str(srow[17] or ""),
+                    "ageing_pct": str(srow[12] or ""), "design_margin_pct": str(srow[13] or ""),
+                    "dod_margin_pct": str(srow[14] or ""), "derating_pct": str(srow[15] or ""),
+                    "capacity_ah": str(srow[27] or ""),
+                    "centre_tap": str(centre_tapping or ""), "cell_type": str(celltype or ""),
+                    "part_code": str(batterypartcode or ""),
+                    "qty_system": str(body.quantity), "rate_system": str(unit_price),
+                    "price_system": str(quote_price),
+                    "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
+                    "custom_cost_desc": "", "custom_cost_price": "",
+                    "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO",
+                    "battery_compliance": "NO", "warranty": "5 year",
+                    "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
+                    "submission_date": "", "submitted_to": "",
+                    "quote_code": code, "sol_no": str(sol_no),
+                })
+        except Exception:
+            pass
+
     return {"detail": "added", "sr_no": sr_no, "quote_price": quote_price}
 
 
@@ -406,8 +463,10 @@ class AddFromWizardReq(BaseModel):
     actual_load_kw: float = 0
     ups_rating_kva: float = 0
     calculated_load_kw: float = 0
+    sizing_project: str = ""
+    sizing_sr_no: int = 0
 
-@router.post("/quotes/{code}/add-from-wizard", status_code=201)
+@router.post("/quotes/{code}/add-from-sizing-screen", status_code=201)
 def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_user), scope: str = Query("regular")):
     multipliers = {"A": 1.0, "B-5": 1.05, "B": 1.10, "B+5": 1.15, "C": 1.20, "C+5": 1.25}
     mult = (1.0 + body.custom_pct / 100.0) if body.price_option == "custom" else multipliers.get(body.price_option, 1.10)
@@ -423,7 +482,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
     meta = next((q for q in quotes if q[0] == code), None)
     if not meta:
         raise HTTPException(404, "Quote not found")
-    q_code, q_date, q_customer, q_provider, q_fmt, *_ = meta
+    q_code, q_date, q_customer, q_provider, q_fmt, *_rest = meta; q_sales = _rest[0] if _rest else ""
 
     sr_no = get_highest_sr_no(code, tdb) + 1
     all_items = get_all_quote_products(code, tdb)
@@ -447,8 +506,48 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
         str(backup_time), calc_load_val,
         str(body.cell_type), str(body.centre_tap), str(body.partcode),
         str(backup_time), body.quantity, quote_price, "-",
-        calc_load_unit=calc_load_unit, db_path=tdb,
+        calc_load_unit=calc_load_unit, item_type="system", db_path=tdb,
     )
+
+    if body.sizing_project and body.sizing_sr_no:
+        try:
+            import time as _time
+            from inquiry_db import push_row as _push_inq
+            _yr = _time.localtime().tm_year % 100
+            _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
+            sdb = get_user_sizing_db(user["username"])
+            srow = fetch_sizing_by_sr(body.sizing_project, body.sizing_sr_no, db_path=sdb)
+            if srow:
+                unit_price = round(quote_price / body.quantity, 2) if body.quantity else quote_price
+                _push_inq({
+                    "inquiry_date": q_date,
+                    "type": _type, "sales_person": str(q_sales or ""),
+                    "solution_provider": str(q_provider or ""),
+                    "project_customer": str(q_customer or ""),
+                    "ups_make": str(srow[3] or ""), "ups_model": str(srow[4] or ""),
+                    "ups_kva": str(srow[5] or ""),
+                    "actual_load_kva": str(srow[6] or ""), "load_kw": str(srow[7] or ""),
+                    "power_factor": str(srow[8] or ""), "inverter_efficiency": str(srow[9] or ""),
+                    "dc_voltage": str(srow[10] or ""), "backup_min": str(srow[11] or ""),
+                    "cell_chemistry": str(srow[17] or ""),
+                    "ageing_pct": str(srow[12] or ""), "design_margin_pct": str(srow[13] or ""),
+                    "dod_margin_pct": str(srow[14] or ""), "derating_pct": str(srow[15] or ""),
+                    "capacity_ah": str(srow[27] or ""),
+                    "centre_tap": str(body.centre_tap or ""), "cell_type": str(body.cell_type or ""),
+                    "part_code": str(body.partcode or ""),
+                    "qty_system": str(body.quantity), "rate_system": str(unit_price),
+                    "price_system": str(quote_price),
+                    "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
+                    "custom_cost_desc": "", "custom_cost_price": "",
+                    "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO",
+                    "battery_compliance": "NO", "warranty": "5 year",
+                    "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
+                    "submission_date": "", "submitted_to": "",
+                    "quote_code": code, "sol_no": str(sol_no),
+                })
+        except Exception:
+            pass
+
     return {"detail": "added", "sr_no": sr_no, "quote_price": quote_price}
 
 
@@ -468,15 +567,52 @@ def add_modular(code: str, body: AddModularReq, user=Depends(get_current_user)):
     meta = next((q for q in quotes if q[0] == code), None)
     if not meta:
         raise HTTPException(404, "Quote not found")
-    q_code, q_date, q_customer, q_provider, q_fmt, *_ = meta
+    q_code, q_date, q_customer, q_provider, q_fmt, *_rest = meta; q_sales = _rest[0] if _rest else ""
 
     sr_no = get_highest_sr_no(code, tdb) + 1
     add_product_quote(
         code, q_code, q_fmt, q_date, q_provider, q_customer,
         sr_no, "-", "-", "-", "-", "-", "-", "-", "-",
-        body.quantity, price, body.rack_key, db_path=tdb,
+        body.quantity, price, body.rack_key, item_type="rack", db_path=tdb,
     )
+    try:
+        from inquiry_db import sync_inquiry_for_quote as _sync_inq
+        updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
+        _sync_inq(code, updated)
+    except Exception:
+        pass
     return {"detail": "added", "sr_no": sr_no, "quote_price": price}
+
+
+# ── add custom cost ───────────────────────────────────────────────────────────
+
+class AddCustomCostReq(BaseModel):
+    description: str
+    price: float
+    quantity: int = 1
+
+@router.post("/quotes/{code}/add-custom-cost", status_code=201)
+def add_custom_cost(code: str, body: AddCustomCostReq, user=Depends(get_current_user)):
+    tdb = get_user_temp_db(user["username"])
+    quotes = get_all_quotes(tdb)
+    meta = next((q for q in quotes if q[0] == code), None)
+    if not meta:
+        raise HTTPException(404, "Quote not found")
+    q_code, q_date, q_customer, q_provider, q_fmt, *_rest = meta; q_sales = _rest[0] if _rest else ""
+
+    sr_no = get_highest_sr_no(code, tdb) + 1
+    add_product_quote(
+        code, q_code, q_fmt, q_date, q_provider, q_customer,
+        sr_no, "-", "-", "-", "-", "-", "-", "-", "-",
+        body.quantity, body.price, body.description, item_type="custom", db_path=tdb,
+    )
+    try:
+        from inquiry_db import sync_inquiry_for_quote as _sync_inq
+        updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
+        _sync_inq(code, updated)
+    except Exception:
+        pass
+    return {"detail": "added", "sr_no": sr_no, "quote_price": body.price}
 
 
 # ── Firebase quote sync ───────────────────────────────────────────────────────
@@ -611,6 +747,12 @@ def reorder_items(code: str, body: ReorderReq, user=Depends(get_current_user), s
         raise HTTPException(500, str(e))
     finally:
         conn.close()
+    try:
+        from inquiry_db import sync_inquiry_for_quote as _sync_inq
+        updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
+        _sync_inq(code, updated)
+    except Exception:
+        pass
     return {"detail": "reordered"}
 
 
@@ -623,6 +765,53 @@ def export_word(code: str, scope: str = Query("regular"), user=Depends(get_curre
         path = _generate_docx(code, tdb)
     except Exception as e:
         raise HTTPException(500, str(e))
+
+    try:
+        import time as _time
+        from inquiry_db import push_row as _push_inq
+        quotes = get_all_quotes(tdb)
+        meta = next((q for q in quotes if q[0] == code), None)
+        if meta:
+            _, q_date, q_customer, q_provider, _, *rest = meta
+            q_sales = rest[0] if rest else ""
+            _yr = _time.localtime().tm_year % 100
+            _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
+            items = get_all_quote_products(code, tdb)
+            system_items = [_row_to_dict(i) for i in items if str(_row_to_dict(i).get("modular_rack", "-")) == "-"]
+            rack_items = [_row_to_dict(i) for i in items if str(_row_to_dict(i).get("modular_rack", "-")) != "-"]
+            first = system_items[0] if system_items else {}
+            first_rack = rack_items[0] if rack_items else {}
+            total_price = sum(float(d.get("quote_price", 0)) * int(d.get("quantity", 1)) for d in system_items)
+            _push_inq({
+                "inquiry_date": q_date or _time.strftime("%d/%m/%Y"),
+                "type": _type, "sales_person": str(q_sales or ""),
+                "solution_provider": str(q_provider or ""),
+                "project_customer": str(q_customer or ""),
+                "ups_make": "", "ups_model": "", "ups_kva": "",
+                "actual_load_kva": "", "load_kw": "",
+                "power_factor": "", "inverter_efficiency": "",
+                "dc_voltage": "", "backup_min": "", "cell_chemistry": "",
+                "ageing_pct": "", "design_margin_pct": "", "dod_margin_pct": "", "derating_pct": "",
+                "capacity_ah": "",
+                "centre_tap": str(first.get("centre_tapping", "")),
+                "cell_type": str(first.get("celltype", "")),
+                "part_code": str(first.get("batterypartcode", "")),
+                "qty_system": str(sum(int(d.get("quantity", 1)) for d in system_items)) if system_items else "",
+                "rate_system": str(first.get("quote_price", "")),
+                "price_system": str(round(total_price, 2)) if system_items else "",
+                "rack_dim": str(first_rack.get("modular_rack", "")),
+                "qty": str(first_rack.get("quantity", "")),
+                "per_rack_price": str(first_rack.get("quote_price", "")),
+                "price": str(round(float(first_rack.get("quote_price", 0)) * int(first_rack.get("quantity", 1)), 2)) if first_rack else "",
+                "custom_cost_desc": "", "custom_cost_price": "",
+                "datasheet": "NO", "sizing_sheet": "NO", "gad": "NO",
+                "battery_compliance": "NO", "warranty": "5 year",
+                "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
+                "submission_date": "", "submitted_to": "",
+            })
+    except Exception:
+        pass
+
     fname = f"Quote_{code}.docx"
     return FileResponse(
         path,

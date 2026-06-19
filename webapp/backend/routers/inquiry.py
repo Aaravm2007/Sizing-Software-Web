@@ -1,17 +1,16 @@
 import sys
-import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from auth import get_current_user
-from firebase_init import get_db
+from inquiry_db import push_row, list_rows, update_row, delete_row, init_inquiry_db
 
+init_inquiry_db()
 router = APIRouter()
-PATH = "inquiry_sheet"
 
 
 class InquiryEntry(BaseModel):
@@ -62,44 +61,22 @@ class InquiryEntry(BaseModel):
 
 @router.get("")
 def list_entries(_=Depends(get_current_user)):
-    db = get_db()
-    data = db.reference(PATH).get() or {}
-    entries = []
-    for k, v in data.items():
-        v["_id"] = k
-        entries.append(v)
-    entries.sort(key=lambda x: x.get("sr_no", 0))
-    return entries
+    return list_rows()
 
 
 @router.post("", status_code=201)
-def create_entry(body: InquiryEntry, user=Depends(get_current_user)):
-    db = get_db()
-    data = db.reference(PATH).get() or {}
-    next_sr = max((v.get("sr_no", 0) for v in data.values()), default=0) + 1
-    entry = body.dict()
-    entry["sr_no"] = next_sr
-    entry["created_at"] = int(time.time() * 1000)
-    entry["created_by"] = user["username"]
-    ref = db.reference(PATH).push(entry)
-    return {"_id": ref.key, "sr_no": next_sr}
+def create_entry(body: InquiryEntry, _=Depends(get_current_user)):
+    sr = push_row(body.dict())
+    return {"sr_no": sr}
 
 
-@router.patch("/{entry_id}")
-def update_entry(entry_id: str, body: Dict[str, Any], _=Depends(get_current_user)):
-    db = get_db()
-    ref = db.reference(f"{PATH}/{entry_id}")
-    if not ref.get():
-        raise HTTPException(404, "Entry not found")
-    ref.update(body)
+@router.patch("/{sr_no}")
+def update_entry(sr_no: int, body: Dict[str, Any], _=Depends(get_current_user)):
+    update_row(sr_no, body)
     return {"ok": True}
 
 
-@router.delete("/{entry_id}")
-def delete_entry(entry_id: str, _=Depends(get_current_user)):
-    db = get_db()
-    ref = db.reference(f"{PATH}/{entry_id}")
-    if not ref.get():
-        raise HTTPException(404, "Entry not found")
-    ref.delete()
+@router.delete("/{sr_no}")
+def delete_entry(sr_no: int, _=Depends(get_current_user)):
+    delete_row(sr_no)
     return {"ok": True}

@@ -386,7 +386,7 @@ export default function SizingFormPage() {
         if (!selectedQuoteCode) return;
         code = selectedQuoteCode;
       }
-      await api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/add-from-wizard`, {
+      await api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/add-from-sizing-screen`, {
         battery_config: selectedCosting.battery_pack,
         duration: selectedCosting.duration,
         kw_calculation: selectedCosting.kw_calculation,
@@ -401,6 +401,8 @@ export default function SizingFormPage() {
         actual_load_kw: parseFloat(form.actual_load_kw) || 0,
         ups_rating_kva: parseFloat(form.ups_rating_kva) || 0,
         calculated_load_kw: parseFloat(form.calculated_load_kw) || 0,
+        sizing_project: projectName,
+        sizing_sr_no: srNo,
       });
       localStorage.setItem(`quote_link_${code}`, JSON.stringify({
         sizing_project: projectName,

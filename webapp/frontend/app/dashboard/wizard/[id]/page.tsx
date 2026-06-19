@@ -299,7 +299,7 @@ export default function WizardComparePage() {
       const ups_rating = uKva > 0 ? String(uKva) : "-";
       const calc_load  = aKva > 0 ? String(aKva) : aKw > 0 ? String(aKw) : "";
 
-      const res = await api.post(`/api/quotation/quotes/${quoteCode}/add-from-wizard?scope=wizard`, {
+      const res = await api.post(`/api/quotation/quotes/${quoteCode}/add-from-sizing-screen?scope=wizard`, {
         battery_config:    col.offered_battery_config,
         duration:          row?.duration || col.backup_requirement_min,
         kw_calculation:    cKw,
@@ -910,26 +910,30 @@ export default function WizardComparePage() {
                     </tr>
                     {FIELDS.map(([lbl, key], rowIdx) => {
                       const rn = rowIdx + 1;
-                      const isYellow = [18, 22, 35, 39].includes(rn);
-                      const isGreen  = [3, 4, 5, 56].includes(rn);
-                      const trCls = isYellow ? "bg-yellow-100 dark:bg-yellow-900/40" : isGreen ? "bg-green-100 dark:bg-green-900/40" : "";
-                      const labelCls = isYellow
-                        ? labelTd + " bg-yellow-100 dark:bg-yellow-900/40 text-red-600"
-                        : isGreen
-                        ? labelTd + " bg-green-100 dark:bg-green-900/40 text-green-900 dark:text-green-200"
-                        : labelTd;
-                      const cellCls = isYellow
-                        ? outTd + " text-red-600"
-                        : isGreen
-                        ? outTd + " text-green-900 dark:text-green-200"
-                        : outTd;
+                      const isBlue  = [19, 23, 36, 40].includes(rn);
+                      const isGreen = [1, 4, 5, 6].includes(rn);
+                      const TEXT_DIFF_KEYS = new Set(["dollar_rate","creation_date","created_by","cell_chemistry","centre_tap","cell_type","application","enclosure","mount","brand","installation","bms_pcm"]);
+                      const colVals = cols.map((col, ci) => { const row = col.costing_rows[resultIdx[ci] ?? 0]; return row ? String((row as any)[key] ?? "") : ""; });
+                      const isDiff = !isBlue && !isGreen && cols.length > 1 && TEXT_DIFF_KEYS.has(key) && new Set(colVals).size > 1;
+                      const trCls = isBlue  ? "bg-blue-100 dark:bg-blue-900/40"
+                                  : isGreen ? "bg-green-100 dark:bg-green-900/40"
+                                  : isDiff  ? "bg-yellow-50 dark:bg-yellow-900/20"
+                                  : "";
+                      const labelCls = isBlue  ? labelTd + " bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 font-bold"
+                                     : isGreen ? labelTd + " bg-green-100 dark:bg-green-900/40 text-green-900 dark:text-green-200"
+                                     : isDiff  ? labelTd + " bg-yellow-50 dark:bg-yellow-900/20"
+                                     : labelTd;
+                      const cellCls = isBlue  ? outTd + " text-blue-800 dark:text-blue-200 font-bold"
+                                    : isGreen ? outTd + " text-green-900 dark:text-green-200"
+                                    : outTd;
                       return (
                       <tr key={key} className={trCls}>
                         <td className={labelCls}>{lbl}</td>
                         {cols.map((col, ci) => {
                           const row = col.costing_rows[resultIdx[ci] ?? 0];
-                          const val = row ? String(row[key] ?? "—") : "—";
-                          return <td key={ci} className={cellCls}>{val}</td>;
+                          const val = row ? String((row as any)[key] ?? "—") : "—";
+                          const cellDiff = isDiff && cols.length > 1 && colVals[ci] !== colVals[0];
+                          return <td key={ci} className={cellCls + (cellDiff ? " bg-yellow-200 dark:bg-yellow-700/50" : "")}>{val}</td>;
                         })}
                       </tr>
                       );

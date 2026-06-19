@@ -293,6 +293,8 @@ export default function QuoteEditorPage() {
       price_option: priceOption,
       quantity: parseInt(qty) || 1,
       custom_pct: parseFloat(customPct) || 0,
+      sizing_project: quoteLink?.sizing_project ?? "",
+      sizing_sr_no: quoteLink?.sizing_sr_no ?? 0,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qKey });
@@ -318,11 +320,10 @@ export default function QuoteEditorPage() {
   });
 
   const addCustomCostMut = useMutation({
-    mutationFn: () => api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/add-modular`, {
-      quote_code: code,
-      rack_key: customCostDesc.trim() || "Custom Item",
+    mutationFn: () => api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/add-custom-cost`, {
+      description: customCostDesc.trim() || "Custom Item",
       quantity: parseInt(customCostQty) || 1,
-      custom_price: parseFloat(customCostPrice) || 0,
+      price: parseFloat(customCostPrice) || 0,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qKey });
