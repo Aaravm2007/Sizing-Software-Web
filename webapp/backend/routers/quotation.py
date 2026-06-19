@@ -624,12 +624,12 @@ def export_word(code: str, scope: str = Query("regular"), user=Depends(get_curre
     )
 
 
-@router.get("/quotes/{code}/export/pdf")
-def export_pdf(code: str, scope: str = Query("regular"), user=Depends(get_current_user)):
-    tdb = _tdb(user["username"], scope)
+def _docx_to_pdf(docx_path: str) -> str:
+    """Convert docx to PDF. Tries win32com (Windows/Word) first, falls back to LibreOffice."""
+    pdf_path = docx_path.replace(".docx", ".pdf")
+
+    # Try win32com first (Windows with Word installed)
     try:
-        docx_path = _generate_docx(code, tdb)
-        pdf_path = docx_path.replace(".docx", ".pdf")
         import win32com.client
         word = win32com.client.Dispatch("Word.Application")
         word.Visible = False
@@ -639,9 +639,37 @@ def export_pdf(code: str, scope: str = Query("regular"), user=Depends(get_curren
             doc.Close()
         finally:
             word.Quit()
-        os.unlink(docx_path)
-    except ImportError:
-        raise HTTPException(501, "PDF export requires Microsoft Word installed on the server")
+        try: os.unlink(docx_path)
+        except: pass
+        return pdf_path
+    except Exception:
+        pass
+
+    # Fall back to LibreOffice (Linux/server)
+    import subprocess
+    out_dir = os.path.dirname(docx_path)
+    for soffice in ("libreoffice", "soffice"):
+        try:
+            result = subprocess.run(
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, docx_path],
+                capture_output=True, timeout=60
+            )
+            if result.returncode == 0 and os.path.exists(pdf_path):
+                try: os.unlink(docx_path)
+                except: pass
+                return pdf_path
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+
+    raise RuntimeError("PDF conversion failed: install LibreOffice on the server (apt-get install libreoffice)")
+
+
+@router.get("/quotes/{code}/export/pdf")
+def export_pdf(code: str, scope: str = Query("regular"), user=Depends(get_current_user)):
+    tdb = _tdb(user["username"], scope)
+    try:
+        docx_path = _generate_docx(code, tdb)
+        pdf_path = _docx_to_pdf(docx_path)
     except Exception as e:
         raise HTTPException(500, str(e))
     return FileResponse(pdf_path, media_type="application/pdf", filename=f"Quote_{code}.pdf")

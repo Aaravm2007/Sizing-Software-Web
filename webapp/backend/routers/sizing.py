@@ -518,27 +518,50 @@ def _build_wizard_excel(body: "WizardExportBody") -> str:
 
 
 def _xlsx_to_pdf(xlsx_path: str) -> str:
-    """Convert xlsx temp file to PDF via win32com. Deletes xlsx. Returns pdf path."""
-    import win32com.client
+    """Convert xlsx to PDF. Tries win32com (Windows/Excel) first, falls back to LibreOffice."""
     pdf_path = xlsx_path.replace(".xlsx", ".pdf")
-    excel = win32com.client.Dispatch("Excel.Application")
-    excel.Visible = False
-    excel.DisplayAlerts = False
+
+    # Try win32com first (Windows with Excel installed)
     try:
-        wb = excel.Workbooks.Open(os.path.abspath(xlsx_path))
-        for sheet in wb.Sheets:
-            sheet.PageSetup.PrintArea = "A1:L52"
-            sheet.PageSetup.Zoom = False
-            sheet.PageSetup.FitToPagesWide = 1
-            sheet.PageSetup.FitToPagesTall = 1
-        wb.ExportAsFixedFormat(0, os.path.abspath(pdf_path))
-    finally:
-        try: wb.Close(False)
+        import win32com.client
+        excel = win32com.client.Dispatch("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        try:
+            wb = excel.Workbooks.Open(os.path.abspath(xlsx_path))
+            for sheet in wb.Sheets:
+                sheet.PageSetup.PrintArea = "A1:L52"
+                sheet.PageSetup.Zoom = False
+                sheet.PageSetup.FitToPagesWide = 1
+                sheet.PageSetup.FitToPagesTall = 1
+            wb.ExportAsFixedFormat(0, os.path.abspath(pdf_path))
+        finally:
+            try: wb.Close(False)
+            except: pass
+            excel.Quit()
+        try: os.unlink(xlsx_path)
         except: pass
-        excel.Quit()
-    try: os.unlink(xlsx_path)
-    except: pass
-    return pdf_path
+        return pdf_path
+    except Exception:
+        pass
+
+    # Fall back to LibreOffice (Linux/server)
+    import subprocess
+    out_dir = os.path.dirname(xlsx_path)
+    for soffice in ("libreoffice", "soffice"):
+        try:
+            result = subprocess.run(
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, xlsx_path],
+                capture_output=True, timeout=60
+            )
+            if result.returncode == 0 and os.path.exists(pdf_path):
+                try: os.unlink(xlsx_path)
+                except: pass
+                return pdf_path
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+
+    raise RuntimeError("PDF conversion failed: install LibreOffice on the server (apt-get install libreoffice)")
 
 
 @router.post("/export-wizard")
