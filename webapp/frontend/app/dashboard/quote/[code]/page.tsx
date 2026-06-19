@@ -257,11 +257,13 @@ export default function QuoteEditorPage() {
     if (!over || active.id === over.id) return;
     const oldIdx = localItems.findIndex(i => i.sr_no === active.id);
     const newIdx = localItems.findIndex(i => i.sr_no === over.id);
-    const reordered = arrayMove(localItems, oldIdx, newIdx).map((item, i) => ({ ...item, sr_no: i + 1 }));
+    const moved = arrayMove(localItems, oldIdx, newIdx);
+    const originalSrNosInNewOrder = moved.map(i => i.sr_no);
+    const reordered = moved.map((item, i) => ({ ...item, sr_no: i + 1 }));
     setLocalItems(reordered);
     try {
       await api.put(`/api/quotation/quotes/${encodeURIComponent(code)}/reorder`, {
-        sr_nos: reordered.map(i => i.sr_no),
+        sr_nos: originalSrNosInNewOrder,
       });
       qc.invalidateQueries({ queryKey: qKey });
     } catch (e: any) {
