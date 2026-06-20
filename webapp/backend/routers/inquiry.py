@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from auth import get_current_user
+from auth import get_current_user, get_expert_user
 from inquiry_db import push_row, list_rows, update_row, delete_row, init_inquiry_db
+from user_db import get_user_inquiry_db
 
 init_inquiry_db()
 router = APIRouter()
@@ -59,6 +60,13 @@ class InquiryEntry(BaseModel):
     data_upload_by: str = ""
 
 
+@router.get("/mine")
+def list_my_entries(user=Depends(get_current_user)):
+    db = get_user_inquiry_db(user["username"])
+    init_inquiry_db(db)
+    return list_rows(db_path=db)
+
+
 @router.get("")
 def list_entries(_=Depends(get_current_user)):
     return list_rows()
@@ -71,12 +79,12 @@ def create_entry(body: InquiryEntry, _=Depends(get_current_user)):
 
 
 @router.patch("/{sr_no}")
-def update_entry(sr_no: int, body: Dict[str, Any], _=Depends(get_current_user)):
+def update_entry(sr_no: int, body: Dict[str, Any], _=Depends(get_expert_user)):
     update_row(sr_no, body)
     return {"ok": True}
 
 
 @router.delete("/{sr_no}")
-def delete_entry(sr_no: int, _=Depends(get_current_user)):
+def delete_entry(sr_no: int, _=Depends(get_expert_user)):
     delete_row(sr_no)
     return {"ok": True}

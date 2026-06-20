@@ -9,9 +9,14 @@ _initialized = False
 
 def init_firebase():
     global _initialized
-    if _initialized or firebase_admin._apps:
+    if _initialized:
+        return
+    try:
+        firebase_admin.get_app()
         _initialized = True
         return
+    except ValueError:
+        pass
 
     app_dir = Path(__file__).parent.parent.parent
     load_dotenv(app_dir / ".env")

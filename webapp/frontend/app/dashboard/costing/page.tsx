@@ -6,9 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
 import { useMe } from "@/lib/use-me";
-import AddToGroupDialog from "@/components/AddToGroupDialog";
 import SubmitApprovalDialog, { type ApprovalItem } from "@/components/SubmitApprovalDialog";
-import { type LocalGroupItem } from "@/lib/local-groups";
 import { getPendingAction, clearPendingAction } from "@/lib/approval-action";
 import { fmtInr } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -173,8 +171,7 @@ export default function CostingPage() {
   const [fromSizing, setFromSizing] = useState(false);
   const [backUrl, setBackUrl] = useState("");
   const [restoring, setRestoring] = useState(false);
-  const [groupDialogItem, setGroupDialogItem] = useState<LocalGroupItem | null>(null);
-  const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
+const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const [pendingAction, setPendingActionState] = useState(() => getPendingAction());
   const pendingForMe = pendingAction?.type === "costing" ? pendingAction : null;
 
@@ -282,16 +279,6 @@ export default function CostingPage() {
       a.download = "costing_export.xlsx";
       a.click();
       window.URL.revokeObjectURL(url);
-      // auto-save record on export
-      api.get("/api/costing/tree").then((treeRes) => {
-        const firstRow = treeRes.data[0];
-        api.post("/api/records", {
-          type: "costing",
-          name: `Costing — ${firstRow?.battery_pack ?? "Export"} ${new Date().toLocaleDateString()}`,
-          customer: "",
-          data: { rows: treeRes.data },
-        }).catch(() => {});
-      }).catch(() => {});
     }).catch(() => toast.error("Export failed"));
   };
 
@@ -373,16 +360,6 @@ export default function CostingPage() {
           Mass Cost Update
         </Button>
         <Button variant="outline" onClick={handleExport}>Export Costing</Button>
-        <Button variant="outline" onClick={async () => {
-          try {
-            const treeRes = await api.get("/api/costing/tree");
-            const firstRow = treeRes.data[0];
-            if (!firstRow) { toast.error("No costing data to add"); return; }
-            setGroupDialogItem({ type: "costing",
-              name: `Costing — ${firstRow.battery_pack ?? "Export"} ${new Date().toLocaleDateString()}`,
-              customer: "", data: { rows: treeRes.data } });
-          } catch { toast.error("Failed to collect costing data"); }
-        }}>Add to Group</Button>
         <Button variant="outline" onClick={async () => {
           try {
             const treeRes = await api.get("/api/costing/tree");
@@ -476,10 +453,7 @@ export default function CostingPage() {
         )}
       </div>
 
-      {groupDialogItem && (
-        <AddToGroupDialog open={!!groupDialogItem} item={groupDialogItem} onClose={() => setGroupDialogItem(null)} />
-      )}
-      {approvalItem && (
+{approvalItem && (
         <SubmitApprovalDialog open={!!approvalItem} item={approvalItem} onClose={() => setApprovalItem(null)} />
       )}
 

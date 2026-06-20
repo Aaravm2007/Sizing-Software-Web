@@ -113,7 +113,9 @@ def _exchange_google_token(id_token: str) -> dict:
 @router.get("/me")
 def me(user: dict = Depends(get_current_user)):
     username = user.get("username", "")
-    return {"username": username, "role": _get_role(username)}
+    admin_usernames = {u.strip() for u in settings.ADMIN_USERNAME.split(",")}
+    role = "e" if username in admin_usernames else _get_role(username)
+    return {"username": username, "role": role}
 
 
 @router.post("/verify-password")

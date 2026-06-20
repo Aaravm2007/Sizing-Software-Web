@@ -5,9 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
-import AddToGroupDialog from "@/components/AddToGroupDialog";
 import SubmitApprovalDialog, { type ApprovalItem } from "@/components/SubmitApprovalDialog";
-import { type LocalGroupItem } from "@/lib/local-groups";
 import { getPendingAction, clearPendingAction } from "@/lib/approval-action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -170,8 +168,7 @@ export default function QuoteEditorPage() {
   const [addCostingOpen, setAddCostingOpen] = useState(false);
   const [addModularOpen, setAddModularOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [groupDialogItem, setGroupDialogItem] = useState<LocalGroupItem | null>(null);
-  const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
+const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const [pendingAction, setPendingActionState] = useState(() => getPendingAction());
   const pendingForMe = pendingAction?.type === "quotation" ? pendingAction : null;
 
@@ -247,13 +244,13 @@ export default function QuoteEditorPage() {
 
   const qKey = ["quote-items", code];
 
-  const { data: items = [], isLoading } = useQuery<QuoteItem[]>({
+  const { data: items, isLoading } = useQuery<QuoteItem[]>({
     queryKey: qKey,
     queryFn: () => api.get(`/api/quotation/quotes/${encodeURIComponent(code)}/items`).then((r) => r.data),
   });
 
   const [localItems, setLocalItems] = useState<QuoteItem[]>([]);
-  useEffect(() => { setLocalItems(items); }, [items]);
+  useEffect(() => { setLocalItems(items ?? []); }, [items]);
 
   const sensors = useSensors(useSensor(PointerSensor));
 
@@ -396,25 +393,6 @@ export default function QuoteEditorPage() {
         window.URL.revokeObjectURL(url);
         setExportOpen(false);
         api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/save-to-firebase`).catch(() => {});
-        // auto-save record on export
-        const first = items[0];
-        if (first) {
-          api.post("/api/records", {
-            type: "quotation",
-            name: `Quote ${code}`,
-            customer: first.customer_name ?? "",
-            data: {
-              meta: {
-                code,
-                date: first.date ?? "",
-                customer_name: first.customer_name ?? "",
-                solution_provider: first.solution_provider ?? "",
-                format_name: first.format ?? "High voltage",
-              },
-              items,
-            },
-          }).catch(() => {});
-        }
       }).catch((e) => toast.error(apiErr(e, "Export failed")));
   };
 
@@ -553,10 +531,7 @@ export default function QuoteEditorPage() {
         </DndContext>
       </div>
 
-      {groupDialogItem && (
-        <AddToGroupDialog open={!!groupDialogItem} item={groupDialogItem} onClose={() => setGroupDialogItem(null)} />
-      )}
-      {approvalItem && (
+{approvalItem && (
         <SubmitApprovalDialog open={!!approvalItem} item={approvalItem} onClose={() => setApprovalItem(null)} />
       )}
 
@@ -886,16 +861,6 @@ export default function QuoteEditorPage() {
                 setExportOpen(false);
                 handleOpenProjectDialog();
               }}>Add to Project</Button>
-              <Button variant="outline" className="w-full" onClick={() => {
-                const first = items[0];
-                if (!first) { toast.error("No items to add"); return; }
-                setExportOpen(false);
-                setGroupDialogItem({ type: "quotation", name: `Quote ${code}`,
-                  customer: first.customer_name ?? "",
-                  data: { meta: { code, date: first.date, customer_name: first.customer_name,
-                                  solution_provider: first.solution_provider, format_name: first.format ?? "High voltage" },
-                          items } });
-              }}>Add to Group</Button>
               <Button variant="outline" className="w-full" onClick={() => {
                 const first = items[0];
                 if (!first) { toast.error("No items to submit"); return; }

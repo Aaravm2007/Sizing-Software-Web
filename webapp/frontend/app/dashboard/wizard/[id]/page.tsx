@@ -356,12 +356,6 @@ export default function WizardComparePage() {
       a.download = `${projectName}_sizing.${fmt}`;
       a.click();
       window.URL.revokeObjectURL(url);
-      api.post("/api/records", {
-        type: "sizing",
-        name: `${projectName} — All (${activeCols.length} sizing${activeCols.length !== 1 ? "s" : ""})`,
-        customer: customerName,
-        data: { project_name: projectName, cols: activeCols },
-      }).catch(() => {});
     } catch (e: any) {
       toast.error(apiErr(e, "Export failed"));
     }
@@ -387,12 +381,6 @@ export default function WizardComparePage() {
       a.download = `${projectName}_costing.${fmt}`;
       a.click();
       window.URL.revokeObjectURL(url);
-      api.post("/api/records", {
-        type: "costing",
-        name: `Costing — ${activePairs2[0]?.row?.battery_pack ?? "Export"} ${new Date().toLocaleDateString()}`,
-        customer: customerName,
-        data: { project_name: projectName, rows: activePairs2.map(p => p.row) },
-      }).catch(() => {});
     } catch (e: any) {
       toast.error(apiErr(e, "Export failed"));
     }

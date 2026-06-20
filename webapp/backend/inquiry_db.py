@@ -18,18 +18,18 @@ _COLS = [
 ]
 
 
-def _conn():
-    c = sqlite3.connect(_DB_PATH)
+def _conn(db_path=None):
+    c = sqlite3.connect(db_path or _DB_PATH)
     c.row_factory = sqlite3.Row
     return c
 
 
-def init_inquiry_db():
+def init_inquiry_db(db_path=None):
     col_defs = ", ".join(
         f'"{c}" {"INTEGER" if c in ("sr_no", "created_at") else "TEXT"}'
         for c in _COLS
     )
-    with _conn() as c:
+    with _conn(db_path) as c:
         c.execute(f'CREATE TABLE IF NOT EXISTS inquiry ({col_defs})')
         c.execute('CREATE TABLE IF NOT EXISTS inquiry_meta (next_id INTEGER DEFAULT 1)')
         if not c.execute('SELECT 1 FROM inquiry_meta').fetchone():
@@ -41,54 +41,52 @@ def init_inquiry_db():
                 pass
 
 
-def _next_sr() -> int:
-    with _conn() as c:
+def _next_sr(db_path=None) -> int:
+    with _conn(db_path) as c:
         row = c.execute('SELECT MAX(sr_no) FROM inquiry').fetchone()
         return (row[0] or 0) + 1
 
 
-def push_row(data: dict) -> str:
-    init_inquiry_db()
-    sr = _next_sr()
+def push_row(data: dict, db_path=None) -> str:
+    init_inquiry_db(db_path)
+    sr = _next_sr(db_path)
     data = {**data, "sr_no": sr, "created_at": int(time.time() * 1000)}
     cols = [k for k in data if k in _COLS]
     ph = ", ".join("?" * len(cols))
     qs = ", ".join(f'"{c}"' for c in cols)
-    with _conn() as c:
+    with _conn(db_path) as c:
         c.execute(f'INSERT INTO inquiry ({qs}) VALUES ({ph})', [data[k] for k in cols])
     return str(sr)
 
 
-def list_rows() -> list:
-    init_inquiry_db()
-    with _conn() as c:
+def list_rows(db_path=None) -> list:
+    init_inquiry_db(db_path)
+    with _conn(db_path) as c:
         rows = [dict(r) for r in c.execute('SELECT * FROM inquiry ORDER BY sr_no').fetchall()]
     for r in rows:
         r["_id"] = str(r["sr_no"])
     return rows
 
 
-def update_row(sr_no: int, data: dict):
-    init_inquiry_db()
+def update_row(sr_no: int, data: dict, db_path=None):
+    init_inquiry_db(db_path)
     fields = [k for k in data if k in _COLS and k != "sr_no"]
     if not fields:
         return
     sets = ", ".join(f'"{f}" = ?' for f in fields)
-    with _conn() as c:
+    with _conn(db_path) as c:
         c.execute(f'UPDATE inquiry SET {sets} WHERE sr_no = ?', [data[f] for f in fields] + [sr_no])
 
 
-def delete_row(sr_no: int):
-    init_inquiry_db()
-    with _conn() as c:
+def delete_row(sr_no: int, db_path=None):
+    init_inquiry_db(db_path)
+    with _conn(db_path) as c:
         c.execute('DELETE FROM inquiry WHERE sr_no = ?', (sr_no,))
 
 
-def sync_inquiry_for_quote(quote_code: str, items: list):
-    """Re-derive rack/custom fields for each system row in inquiry.
-    items: list of _row_to_dict dicts ordered by sr_no ascending.
-    """
-    init_inquiry_db()
+def sync_inquiry_for_quote(quote_code: str, items: list, db_path=None):
+    """Re-derive rack/custom fields for each system row in inquiry."""
+    init_inquiry_db(db_path)
     system_items = [i for i in items if str(i.get("item_type", "system")) == "system"]
     rack_items   = [i for i in items if str(i.get("item_type", "")) == "rack"]
     custom_items = [i for i in items if str(i.get("item_type", "")) == "custom"]
@@ -97,7 +95,6 @@ def sync_inquiry_for_quote(quote_code: str, items: list):
         sol_no = str(sys_item.get("sol_no", ""))
         sys_sr = int(sys_item.get("sr_no", 0))
 
-        # racks that appear after this system and before the next system
         next_sys_sr = min(
             (int(s.get("sr_no", 0)) for s in system_items if int(s.get("sr_no", 0)) > sys_sr),
             default=999999
@@ -107,7 +104,6 @@ def sync_inquiry_for_quote(quote_code: str, items: list):
         my_customs = [r for r in custom_items
                       if sys_sr < int(r.get("sr_no", 0)) < next_sys_sr]
 
-        # build update fields
         fields: dict = {}
         if my_racks:
             first_rack = my_racks[0]
@@ -136,7 +132,7 @@ def sync_inquiry_for_quote(quote_code: str, items: list):
             fields["custom_cost_desc"] = ""
             fields["custom_cost_price"] = ""
 
-        with _conn() as conn:
+        with _conn(db_path) as conn:
             row = conn.execute(
                 'SELECT sr_no FROM inquiry WHERE quote_code = ? AND sol_no = ?',
                 (quote_code, sol_no)
@@ -147,3 +143,42 @@ def sync_inquiry_for_quote(quote_code: str, items: list):
                     f'UPDATE inquiry SET {sets} WHERE quote_code = ? AND sol_no = ?',
                     [fields[f] for f in fields] + [quote_code, sol_no]
                 )
+
+
+def push_to_global(quote_code: str, user_db_path: str):
+    """Upsert all inquiry rows for quote_code from user DB into global DB."""
+    init_inquiry_db(user_db_path)
+    init_inquiry_db()
+
+    with _conn(user_db_path) as uc:
+        col_info = uc.execute('PRAGMA table_info(inquiry)').fetchall()
+        db_cols = [r[1] for r in col_info]
+        rows = uc.execute('SELECT * FROM inquiry WHERE quote_code = ?', (quote_code,)).fetchall()
+        if not rows:
+            return
+        rows = [dict(zip(db_cols, r)) for r in rows]
+
+    with _conn() as gc:
+        for data in rows:
+            sol_no = data.get('sol_no')
+            existing = gc.execute(
+                'SELECT sr_no FROM inquiry WHERE quote_code = ? AND sol_no = ?',
+                (quote_code, sol_no)
+            ).fetchone()
+            if existing:
+                fields = {k: data[k] for k in data if k in _COLS and k not in ('sr_no', 'created_at')}
+                sets = ', '.join(f'"{f}" = ?' for f in fields)
+                gc.execute(
+                    f'UPDATE inquiry SET {sets} WHERE quote_code = ? AND sol_no = ?',
+                    list(fields.values()) + [quote_code, sol_no]
+                )
+            else:
+                insert_data = {k: data[k] for k in data if k in _COLS and k != 'sr_no'}
+                insert_data['created_at'] = int(time.time() * 1000)
+                max_sr = gc.execute('SELECT MAX(sr_no) FROM inquiry').fetchone()[0]
+                insert_data['sr_no'] = (max_sr or 0) + 1
+                valid = [k for k in insert_data if k in _COLS]
+                ph = ', '.join('?' * len(valid))
+                qs = ', '.join(f'"{c}"' for c in valid)
+                gc.execute(f'INSERT INTO inquiry ({qs}) VALUES ({ph})', [insert_data[k] for k in valid])
+

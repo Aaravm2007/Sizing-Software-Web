@@ -33,3 +33,7 @@ def get_user_temp_db(username: str) -> str:
 
 def get_user_wizard_temp_db(username: str) -> str:
     return str(_user_dir(username) / "wizard_temp.db")
+
+
+def get_user_inquiry_db(username: str) -> str:
+    return str(_user_dir(username) / "inquiry.db")

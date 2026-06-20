@@ -87,24 +87,44 @@ function displayVal(col: Col, val: string) {
 
 export default function InquiryPage() {
   const qc = useQueryClient();
-  const qKey = ["inquiry"];
+  const [tab, setTab] = useState<"global" | "mine">("global");
 
-  const { data: entries = [], isLoading } = useQuery({
-    queryKey: qKey,
+  const globalKey = ["inquiry", "global"];
+  const mineKey   = ["inquiry", "mine"];
+  const activeKey = tab === "global" ? globalKey : mineKey;
+
+  const { data: globalEntries = [], isLoading: globalLoading } = useQuery({
+    queryKey: globalKey,
     queryFn: () => api.get("/api/inquiry").then(r => r.data),
   });
+
+  const { data: mineEntries = [], isLoading: mineLoading } = useQuery({
+    queryKey: mineKey,
+    queryFn: () => api.get("/api/inquiry/mine").then(r => r.data),
+  });
+
+  const entries  = tab === "global" ? globalEntries : mineEntries;
+  const isLoading = tab === "global" ? globalLoading : mineLoading;
+
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.get("/api/auth/me").then(r => r.data),
+    staleTime: Infinity,
+  });
+  const isExpert = me?.role === "e";
 
   // editing state: { id, key } | null
   const [editing, setEditing] = useState<{ id: string; key: string } | null>(null);
   const [editVal, setEditVal] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // ── delete confirm ─────────────────────────────────────────────────────────
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null); // sr_no as string
 
-  // ── delete row ─────────────────────────────────────────────────────────────
   const delMut = useMutation({
     mutationFn: (id: string) => api.delete(`/api/inquiry/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qKey }),
-    onError: (e: any) => toast.error(apiErr(e, "Delete failed")),
+    onSuccess: () => { setConfirmDelete(null); qc.invalidateQueries({ queryKey: activeKey }); },
+    onError: (e: any) => { setConfirmDelete(null); toast.error(apiErr(e, "Delete failed")); },
   });
 
   // ── patch field ────────────────────────────────────────────────────────────
@@ -133,7 +153,7 @@ export default function InquiryPage() {
   const toggleYN = (id: string, key: string, current: string) => {
     const next = current === "YES" ? "NO" : "YES";
     patchMut.mutate({ id, patch: { [key]: next } });
-    qc.setQueryData(qKey, (old: any[]) =>
+    qc.setQueryData(activeKey, (old: any[]) =>
       old.map(e => e._id === id ? { ...e, [key]: next } : e)
     );
   };
@@ -150,9 +170,26 @@ export default function InquiryPage() {
       {/* ── toolbar ── */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b bg-background shrink-0">
         <h1 className="text-lg font-bold">UPS Inquiry Sheet</h1>
+        {/* tabs */}
+        <div className="flex gap-1 ml-2">
+          {(["global", "mine"] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => { setEditing(null); setTab(t); }}
+              className={cn(
+                "px-3 py-1 rounded text-xs font-medium transition-colors",
+                tab === t
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              )}
+            >
+              {t === "global" ? "Global" : "My Entries"}
+            </button>
+          ))}
+        </div>
         <span className="text-xs text-muted-foreground">{entries.length} entries</span>
         <div className="flex-1" />
-        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => qc.invalidateQueries({ queryKey: qKey })}>
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => qc.invalidateQueries({ queryKey: activeKey })}>
           <RefreshCw className="h-3.5 w-3.5" />
           Reload
         </Button>
@@ -173,8 +210,8 @@ export default function InquiryPage() {
                   {col.label}
                 </th>
               ))}
-              {/* delete col */}
-              <th className="border border-muted px-1 py-2" style={{ width: 40, minWidth: 40 }} />
+              {/* delete col — experts only, global tab only */}
+              {isExpert && tab === "global" && <th className="border border-muted px-1 py-2" style={{ width: 40, minWidth: 40 }} />}
             </tr>
           </thead>
           <tbody>
@@ -196,12 +233,13 @@ export default function InquiryPage() {
                 {COLS.map(col => {
                   const val = String(row[col.key] ?? "");
                   const isEditing = editing?.id === row._id && editing?.key === col.key;
+                  const canEdit = isExpert && tab === "global";
 
                   if (col.type === "yn") {
                     return (
                       <td key={col.key}
-                        className="border border-muted px-1 py-1 text-center cursor-pointer select-none"
-                        onClick={() => toggleYN(row._id, col.key, val)}>
+                        className={cn("border border-muted px-1 py-1 text-center select-none", canEdit && "cursor-pointer")}
+                        onClick={() => canEdit && toggleYN(row._id, col.key, val)}>
                         <span className={cn(
                           "inline-block px-1.5 py-0.5 rounded text-xs font-medium",
                           val === "YES"
@@ -216,8 +254,8 @@ export default function InquiryPage() {
 
                   return (
                     <td key={col.key}
-                      className="border border-muted px-0 py-0 cursor-text"
-                      onClick={() => !isEditing && startEdit(row._id, col.key, val)}>
+                      className={cn("border border-muted px-0 py-0", canEdit && "cursor-text")}
+                      onClick={() => canEdit && !isEditing && startEdit(row._id, col.key, val)}>
                       {isEditing ? (
                         <input
                           ref={inputRef}
@@ -240,17 +278,30 @@ export default function InquiryPage() {
                   );
                 })}
 
-                {/* delete button */}
-                <td className="border border-muted px-1 py-1 text-center">
-                  <button
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-opacity"
-                    onClick={() => {
-                      if (confirm(`Delete row ${row.sr_no}?`)) delMut.mutate(row._id);
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </td>
+                {/* delete button — experts only, global tab only */}
+                {isExpert && tab === "global" && (
+                  <td className="border border-muted px-1 py-1 text-center">
+                    {confirmDelete === String(row.sr_no) ? (
+                      <div className="flex items-center gap-1 justify-center">
+                        <button
+                          className="px-1.5 py-0.5 rounded text-xs bg-red-500 text-white hover:bg-red-600"
+                          onClick={() => delMut.mutate(String(row.sr_no))}
+                        >Yes</button>
+                        <button
+                          className="px-1.5 py-0.5 rounded text-xs bg-muted hover:bg-muted/80 text-muted-foreground"
+                          onClick={() => setConfirmDelete(null)}
+                        >No</button>
+                      </div>
+                    ) : (
+                      <button
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-opacity"
+                        onClick={() => setConfirmDelete(String(row.sr_no))}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

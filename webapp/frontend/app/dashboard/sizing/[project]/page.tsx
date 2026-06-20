@@ -5,9 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
-import AddToGroupDialog from "@/components/AddToGroupDialog";
 import SubmitApprovalDialog, { type ApprovalItem } from "@/components/SubmitApprovalDialog";
-import { type LocalGroupItem } from "@/lib/local-groups";
 import { getPendingAction, clearPendingAction } from "@/lib/approval-action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,8 +35,7 @@ export default function SizingListPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<"all" | "selected">("all");
   const [exportFormat, setExportFormat] = useState<"excel" | "pdf">("excel");
-  const [groupDialogItem, setGroupDialogItem] = useState<LocalGroupItem | null>(null);
-  const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
+const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
   const [pendingAction, setPendingActionState] = useState(() => getPendingAction());
   const pendingForMe = pendingAction?.type === "sizing" ? pendingAction : null;
@@ -108,39 +105,6 @@ export default function SizingListPage() {
       a.click();
       window.URL.revokeObjectURL(url);
       setExportOpen(false);
-      // auto-save 1 record for entire export (1 file = 1 record)
-      if (sr != null) {
-        // selected: single sizing → data.form
-        api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`)
-          .then((r) => {
-            const row = sizings.find((s) => s.sr_no === sr);
-            api.post("/api/records", {
-              type: "sizing",
-              name: `${projectName} — Sr. ${sr}${row?.offered_battery_config ? ` (${row.offered_battery_config})` : ""}`,
-              customer: r.data.customer_name ?? "",
-              data: { project_name: projectName, form: r.data },
-            }).catch(() => {});
-          }).catch(() => {});
-      } else {
-        // all: fetch every sizing then save one record with forms array
-        Promise.all(
-          sizings.map((s) =>
-            api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`)
-              .then((r) => r.data)
-              .catch(() => null)
-          )
-        ).then((forms) => {
-          const validForms = forms.filter(Boolean);
-          if (validForms.length === 0) return;
-          const customer = validForms[0]?.customer_name ?? "";
-          api.post("/api/records", {
-            type: "sizing",
-            name: `${projectName} — All (${validForms.length} sizing${validForms.length !== 1 ? "s" : ""})`,
-            customer,
-            data: { project_name: projectName, forms: validForms },
-          }).catch(() => {});
-        });
-      }
     }).catch((e) => toast.error(apiErr(e, "Export failed")));
   };
 
@@ -270,14 +234,7 @@ export default function SizingListPage() {
         </Button>
       </div>
 
-      {groupDialogItem && (
-        <AddToGroupDialog
-          open={!!groupDialogItem}
-          item={groupDialogItem}
-          onClose={() => setGroupDialogItem(null)}
-        />
-      )}
-      {approvalItem && (
+{approvalItem && (
         <SubmitApprovalDialog
           open={!!approvalItem}
           item={approvalItem}
@@ -346,26 +303,6 @@ export default function SizingListPage() {
           </div>
           <DialogFooter className="flex-col gap-2 sm:flex-col">
             <Button onClick={handleExport} className="w-full">Export</Button>
-            <Button variant="outline" className="w-full" onClick={async () => {
-              const sr = exportScope === "selected" ? selected : null;
-              try {
-                let name: string; let data: any;
-                if (sr != null) {
-                  const r = await api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`);
-                  const row = sizings.find((s) => s.sr_no === sr);
-                  name = `${projectName} — Sr. ${sr}${row?.offered_battery_config ? ` (${row.offered_battery_config})` : ""}`;
-                  data = { project_name: projectName, form: r.data };
-                } else {
-                  const forms = (await Promise.all(
-                    sizings.map((s) => api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`).then((r) => r.data).catch(() => null))
-                  )).filter(Boolean);
-                  name = `${projectName} — All (${forms.length} sizing${forms.length !== 1 ? "s" : ""})`;
-                  data = { project_name: projectName, forms };
-                }
-                setExportOpen(false);
-                setGroupDialogItem({ type: "sizing", name, customer: data.form?.customer_name ?? data.forms?.[0]?.customer_name ?? "", data });
-              } catch { toast.error("Failed to collect sizing data"); }
-            }}>Add to Group</Button>
             <Button variant="outline" className="w-full" onClick={async () => {
               const sr = exportScope === "selected" ? selected : null;
               try {

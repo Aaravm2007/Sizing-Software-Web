@@ -23,7 +23,7 @@ from tempquotebase import (
     get_highest_sr_no, get_db_connection, get_items_table_name,
 )
 from auth import get_current_user
-from user_db import get_user_costing_db, get_user_temp_db, get_user_wizard_temp_db, get_user_sizing_db
+from user_db import get_user_costing_db, get_user_temp_db, get_user_wizard_temp_db, get_user_sizing_db, get_user_inquiry_db
 from sql_handler import fetch_sizing_by_sr
 
 init_temp_db()
@@ -319,14 +319,16 @@ def patch_meta(code: str, body: PatchMetaReq, user=Depends(get_current_user), sc
 
     try:
         from inquiry_db import _conn as _inq_conn, init_inquiry_db as _inq_init
-        _inq_init()
-        with _inq_conn() as c:
-            c.execute(
-                "UPDATE inquiry SET project_customer=?, solution_provider=?, sales_person=? WHERE quote_code=?",
-                (customer, provider, sales, code)
-            )
-            if new_code != code:
-                c.execute("UPDATE inquiry SET quote_code=? WHERE quote_code=?", (new_code, code))
+        user_inq_db = get_user_inquiry_db(user["username"])
+        for _dbp in [user_inq_db, None]:
+            _inq_init(_dbp)
+            with _inq_conn(_dbp) as c:
+                c.execute(
+                    "UPDATE inquiry SET project_customer=?, solution_provider=?, sales_person=? WHERE quote_code=?",
+                    (customer, provider, sales, code)
+                )
+                if new_code != code:
+                    c.execute("UPDATE inquiry SET quote_code=? WHERE quote_code=?", (new_code, code))
     except Exception:
         pass
 
@@ -342,8 +344,9 @@ def remove_quote(code: str, user=Depends(get_current_user), scope: str = Query("
         raise HTTPException(500, str(e))
     try:
         from inquiry_db import _conn as _inq_conn, init_inquiry_db as _inq_init
-        _inq_init()
-        with _inq_conn() as c:
+        user_inq_db = get_user_inquiry_db(user["username"])
+        _inq_init(user_inq_db)
+        with _inq_conn(user_inq_db) as c:
             c.execute('DELETE FROM inquiry WHERE quote_code = ?', (code,))
     except Exception:
         pass
@@ -402,13 +405,14 @@ def delete_item(code: str, sr_no: int, user=Depends(get_current_user)):
         )
     try:
         from inquiry_db import sync_inquiry_for_quote as _sync_inq, _conn as _inq_conn, init_inquiry_db as _inq_init
-        _inq_init()
+        user_inq_db = get_user_inquiry_db(user["username"])
+        _inq_init(user_inq_db)
         if deleted_d and str(deleted_d.get("item_type", "system")) == "system":
-            with _inq_conn() as c:
+            with _inq_conn(user_inq_db) as c:
                 c.execute('DELETE FROM inquiry WHERE quote_code = ? AND sol_no = ?',
                           (code, str(deleted_d.get("sol_no", ""))))
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
-        _sync_inq(code, updated)
+        _sync_inq(code, updated, db_path=user_inq_db)
     except Exception:
         pass
     return {"detail": "deleted"}
@@ -484,6 +488,7 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
             _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
             sdb = get_user_sizing_db(user["username"])
             srow = fetch_sizing_by_sr(body.sizing_project, body.sizing_sr_no, db_path=sdb)
+            user_inq_db = get_user_inquiry_db(user["username"])
             if srow:
                 unit_price = round(quote_price / body.quantity, 2) if body.quantity else quote_price
                 _push_inq({
@@ -512,7 +517,7 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
                     "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
                     "submission_date": "", "submitted_to": "",
                     "quote_code": code, "sol_no": str(sol_no),
-                })
+                }, db_path=user_inq_db)
         except Exception:
             pass
 
@@ -570,8 +575,15 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
         calc_load_val = ""
         calc_load_unit = "kW"
 
-    # backup_time_min = actual sizing-calculated backup; fall back to duration if absent
-    raw_bt = body.backup_time_min if body.backup_time_min and body.backup_time_min != "0" else body.duration
+    # backup_req = user-requested time (duration input during sizing)
+    raw_req = body.duration
+    try:
+        backup_req = str(math.floor(float("".join(c for c in raw_req if c.isdigit() or c == ".")))) if raw_req else "-"
+    except Exception:
+        backup_req = "-"
+
+    # backup_time = calculated actual backup time from sizing output
+    raw_bt = body.backup_time_min if body.backup_time_min and body.backup_time_min != "0" else ""
     try:
         backup_time = str(math.floor(float("".join(c for c in raw_bt if c.isdigit() or c == ".")))) if raw_bt else "-"
     except Exception:
@@ -582,9 +594,9 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
     add_product_quote(
         code, q_code, q_fmt, q_date, q_provider, q_customer,
         sr_no, sol_no, ups_rating_val,
-        str(backup_time), calc_load_val,
+        backup_req, calc_load_val,
         str(body.cell_type), str(body.centre_tap), str(body.partcode),
-        str(backup_time), body.quantity, quote_price, "-",
+        backup_time, body.quantity, quote_price, "-",
         calc_load_unit=calc_load_unit, item_type="system", ageing_type=ageing_type, db_path=tdb,
     )
 
@@ -594,6 +606,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
         _yr = _time.localtime().tm_year % 100
         _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
         unit_price = round(quote_price / body.quantity, 2) if body.quantity else quote_price
+        user_inq_db = get_user_inquiry_db(user["username"])
 
         if body.sizing_project and body.sizing_sr_no:
             sdb = get_user_sizing_db(user["username"])
@@ -627,7 +640,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                     "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
                     "submission_date": "", "submitted_to": "",
                     "quote_code": code, "sol_no": str(sol_no),
-                })
+                }, db_path=user_inq_db)
         else:
             # wizard flow — use body data + optional costing row lookup by partcode
             _dc_volt = ""
@@ -660,7 +673,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                 "load_kw": str(body.actual_load_kw or body.calculated_load_kw or ""),
                 "power_factor": "", "inverter_efficiency": "",
                 "dc_voltage": _dc_volt,
-                "backup_min": str(backup_time if backup_time != "-" else ""),
+                "backup_min": str(backup_req if backup_req != "-" else ""),
                 "cell_chemistry": str(_crow.get("cell_chemistry", "") or "LFP"),
                 "ageing_pct": "", "design_margin_pct": "", "dod_margin_pct": "", "derating_pct": "",
                 "capacity_ah": str(_crow.get("ampere_capacity", "") or ""),
@@ -676,7 +689,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                 "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
                 "submission_date": "", "submitted_to": "",
                 "quote_code": code, "sol_no": str(sol_no),
-            })
+            }, db_path=user_inq_db)
     except Exception:
         pass
 
@@ -709,8 +722,9 @@ def add_modular(code: str, body: AddModularReq, user=Depends(get_current_user)):
     )
     try:
         from inquiry_db import sync_inquiry_for_quote as _sync_inq
+        user_inq_db = get_user_inquiry_db(user["username"])
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
-        _sync_inq(code, updated)
+        _sync_inq(code, updated, db_path=user_inq_db)
     except Exception:
         pass
     return {"detail": "added", "sr_no": sr_no, "quote_price": price}
@@ -740,8 +754,9 @@ def add_custom_cost(code: str, body: AddCustomCostReq, user=Depends(get_current_
     )
     try:
         from inquiry_db import sync_inquiry_for_quote as _sync_inq
+        user_inq_db = get_user_inquiry_db(user["username"])
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
-        _sync_inq(code, updated)
+        _sync_inq(code, updated, db_path=user_inq_db)
     except Exception:
         pass
     return {"detail": "added", "sr_no": sr_no, "quote_price": body.price}
@@ -899,48 +914,9 @@ def export_word(code: str, scope: str = Query("regular"), user=Depends(get_curre
         raise HTTPException(500, str(e))
 
     try:
-        import time as _time
-        from inquiry_db import push_row as _push_inq
-        quotes = get_all_quotes(tdb)
-        meta = next((q for q in quotes if q[0] == code), None)
-        if meta:
-            _, q_date, q_customer, q_provider, _, *rest = meta
-            q_sales = rest[0] if rest else ""
-            _yr = _time.localtime().tm_year % 100
-            _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
-            items = get_all_quote_products(code, tdb)
-            system_items = [_row_to_dict(i) for i in items if str(_row_to_dict(i).get("modular_rack", "-")) == "-"]
-            rack_items = [_row_to_dict(i) for i in items if str(_row_to_dict(i).get("modular_rack", "-")) != "-"]
-            first = system_items[0] if system_items else {}
-            first_rack = rack_items[0] if rack_items else {}
-            total_price = sum(float(d.get("quote_price", 0)) * int(d.get("quantity", 1)) for d in system_items)
-            _push_inq({
-                "inquiry_date": q_date or _time.strftime("%d/%m/%Y"),
-                "type": _type, "sales_person": str(q_sales or ""),
-                "solution_provider": str(q_provider or ""),
-                "project_customer": str(q_customer or ""),
-                "ups_make": "", "ups_model": "", "ups_kva": "",
-                "actual_load_kva": "", "load_kw": "",
-                "power_factor": "", "inverter_efficiency": "",
-                "dc_voltage": "", "backup_min": "", "cell_chemistry": "",
-                "ageing_pct": "", "design_margin_pct": "", "dod_margin_pct": "", "derating_pct": "",
-                "capacity_ah": "",
-                "centre_tap": str(first.get("centre_tapping", "")),
-                "cell_type": str(first.get("celltype", "")),
-                "part_code": str(first.get("batterypartcode", "")),
-                "qty_system": str(sum(int(d.get("quantity", 1)) for d in system_items)) if system_items else "",
-                "rate_system": str(first.get("quote_price", "")),
-                "price_system": str(round(total_price, 2)) if system_items else "",
-                "rack_dim": str(first_rack.get("modular_rack", "")),
-                "qty": str(first_rack.get("quantity", "")),
-                "per_rack_price": str(first_rack.get("quote_price", "")),
-                "price": str(round(float(first_rack.get("quote_price", 0)) * int(first_rack.get("quantity", 1)), 2)) if first_rack else "",
-                "custom_cost_desc": "", "custom_cost_price": "",
-                "datasheet": "NO", "sizing_sheet": "NO", "gad": "NO",
-                "battery_compliance": "NO", "warranty": "5 year",
-                "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
-                "submission_date": "", "submitted_to": "",
-            })
+        from inquiry_db import push_to_global as _push_to_global
+        user_inq_db = get_user_inquiry_db(user["username"])
+        _push_to_global(code, user_inq_db)
     except Exception:
         pass
 
@@ -972,6 +948,12 @@ def export_pdf(code: str, scope: str = Query("regular"), user=Depends(get_curren
         raise HTTPException(501, "PDF export requires Microsoft Word installed on the server")
     except Exception as e:
         raise HTTPException(500, str(e))
+    try:
+        from inquiry_db import push_to_global as _push_to_global
+        user_inq_db = get_user_inquiry_db(user["username"])
+        _push_to_global(code, user_inq_db)
+    except Exception:
+        pass
     return FileResponse(pdf_path, media_type="application/pdf", filename=f"Quote_{code}.pdf")
 
 
