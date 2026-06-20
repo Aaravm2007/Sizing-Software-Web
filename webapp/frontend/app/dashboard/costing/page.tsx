@@ -167,6 +167,8 @@ export default function CostingPage() {
   const [pwValue, setPwValue] = useState("");
   const [pwPending, setPwPending] = useState(false);
   const [pendingSaveIdx, setPendingSaveIdx] = useState<number | null>(null);
+  const [pwMode, setPwMode] = useState<"save" | "deactivate">("save");
+  const [pendingDeactivateIdx, setPendingDeactivateIdx] = useState<number | null>(null);
 
   const [fromSizing, setFromSizing] = useState(false);
   const [backUrl, setBackUrl] = useState("");
@@ -233,22 +235,44 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
   const saveFbMut = useMutation({
     mutationFn: (idx: number) => api.post(`/api/costing/tree/${idx}/save-to-firebase`),
-    onSuccess: () => { toast.success("Saved to Firebase"); setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); },
+    onSuccess: () => { toast.success("Saved to database"); setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); setPwMode("save"); },
     onError: (e: any) => toast.error(apiErr(e, "Save failed")),
+  });
+
+  const deactivateFbMut = useMutation({
+    mutationFn: (idx: number) => api.post(`/api/costing/tree/${idx}/deactivate-in-firebase`),
+    onSuccess: (res: any) => {
+      const d = res.data;
+      if (d.deactivated === 0) toast.warning(`No matching record found: ${d.reason ?? ""}`);
+      else toast.success("Deactivated in database");
+      setPwDialogOpen(false); setPwValue(""); setPendingDeactivateIdx(null); setPwMode("save");
+    },
+    onError: (e: any) => toast.error(apiErr(e, "Deactivate failed")),
   });
 
   const handleSaveClick = (idx: number) => {
     setPendingSaveIdx(idx);
+    setPwMode("save");
+    setPwValue("");
+    setPwDialogOpen(true);
+  };
+
+  const handleDeactivateClick = (idx: number) => {
+    setPendingDeactivateIdx(idx);
+    setPwMode("deactivate");
     setPwValue("");
     setPwDialogOpen(true);
   };
 
   const handlePwConfirm = async () => {
-    if (!pwValue || pendingSaveIdx === null) return;
+    if (!pwValue) return;
+    if (pwMode === "save" && pendingSaveIdx === null) return;
+    if (pwMode === "deactivate" && pendingDeactivateIdx === null) return;
     setPwPending(true);
     try {
       await api.post("/api/auth/verify-password", { password: pwValue });
-      saveFbMut.mutate(pendingSaveIdx);
+      if (pwMode === "save") saveFbMut.mutate(pendingSaveIdx!);
+      else deactivateFbMut.mutate(pendingDeactivateIdx!);
     } catch {
       toast.error("Incorrect password");
     } finally {
@@ -288,6 +312,26 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       return;
     }
     searchMut.mutate();
+  };
+
+  const [reloading, setReloading] = useState(false);
+  const handleReload = async () => {
+    if (!batteryConfig.trim() || !duration.trim()) {
+      toast.warning("Enter Battery Configuration and select Duration");
+      return;
+    }
+    setReloading(true);
+    try {
+      await api.delete("/api/costing/tree");
+      await api.post("/api/costing/tree/search", { duration, keyword: batteryConfig });
+      qc.invalidateQueries({ queryKey: ["costing-tree"] });
+      setSelectedCol(null);
+      toast.success("Costing table reloaded");
+    } catch (e: any) {
+      toast.error(apiErr(e, "Reload failed"));
+    } finally {
+      setReloading(false);
+    }
   };
 
   return (
@@ -350,6 +394,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         <Button onClick={handleSearch} disabled={searchMut.isPending}>
           Search &amp; Add
         </Button>
+        <Button variant="outline" onClick={handleReload} disabled={reloading}>
+          {reloading ? "Reloading…" : "Reload Table"}
+        </Button>
         <Button variant="outline" onClick={() => {
           const qs = fromSizing ? `?from=sizing&back=${encodeURIComponent(backUrl)}` : "";
           router.push(`/dashboard/costing/new${qs}`);
@@ -378,6 +425,17 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
             title={selectedCol === null ? "Select a column first" : `Save Option ${selectedCol + 1} to Database`}
           >
             {saveFbMut.isPending ? "Saving…" : selectedCol !== null ? `Save Option ${selectedCol + 1} to Database` : "Save to Database"}
+          </Button>
+        )}
+        {isExpert && (
+          <Button
+            variant="outline"
+            className="border-destructive text-destructive hover:bg-destructive/10"
+            onClick={() => selectedCol !== null && handleDeactivateClick(selectedCol)}
+            disabled={selectedCol === null || deactivateFbMut.isPending}
+            title={selectedCol === null ? "Select a column first" : `Deactivate Option ${selectedCol + 1} from Database`}
+          >
+            {deactivateFbMut.isPending ? "Deactivating…" : selectedCol !== null ? `Deactivate Option ${selectedCol + 1} from Database` : "Deactivate from Database"}
           </Button>
         )}
         <Button variant="destructive" onClick={() => clearMut.mutate()} disabled={clearMut.isPending}>
@@ -457,11 +515,17 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         <SubmitApprovalDialog open={!!approvalItem} item={approvalItem} onClose={() => setApprovalItem(null)} />
       )}
 
-      <Dialog open={pwDialogOpen} onOpenChange={(o) => { if (!o) { setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); } }}>
+      <Dialog open={pwDialogOpen} onOpenChange={(o) => { if (!o) { setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); setPendingDeactivateIdx(null); setPwMode("save"); } }}>
         <DialogContent className="sm:max-w-xs">
-          <DialogHeader><DialogTitle>Confirm Password</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{pwMode === "deactivate" ? "Confirm Deactivation" : "Confirm Password"}</DialogTitle>
+          </DialogHeader>
           <div className="flex flex-col gap-3 py-2">
-            <p className="text-sm text-muted-foreground">Enter your password to save Option {pendingSaveIdx !== null ? pendingSaveIdx + 1 : ""} to the database.</p>
+            <p className="text-sm text-muted-foreground">
+              {pwMode === "deactivate"
+                ? `Enter your password to deactivate Option ${pendingDeactivateIdx !== null ? pendingDeactivateIdx + 1 : ""} from the database.`
+                : `Enter your password to save Option ${pendingSaveIdx !== null ? pendingSaveIdx + 1 : ""} to the database.`}
+            </p>
             <Input
               type="password"
               placeholder="Password"
@@ -472,9 +536,15 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
             />
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="ghost" onClick={() => { setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); }}>Cancel</Button>
-            <Button onClick={handlePwConfirm} disabled={!pwValue || pwPending || saveFbMut.isPending}>
-              {pwPending || saveFbMut.isPending ? "Saving…" : "Confirm"}
+            <Button variant="ghost" onClick={() => { setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); setPendingDeactivateIdx(null); setPwMode("save"); }}>Cancel</Button>
+            <Button
+              variant={pwMode === "deactivate" ? "destructive" : "default"}
+              onClick={handlePwConfirm}
+              disabled={!pwValue || pwPending || saveFbMut.isPending || deactivateFbMut.isPending}
+            >
+              {pwPending || saveFbMut.isPending || deactivateFbMut.isPending
+                ? (pwMode === "deactivate" ? "Deactivating…" : "Saving…")
+                : "Confirm"}
             </Button>
           </DialogFooter>
         </DialogContent>

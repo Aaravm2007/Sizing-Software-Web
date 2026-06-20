@@ -15,7 +15,7 @@ TEMPLATE = str(APP_DIR / "templates" / "Costing_sheet_template.xlsx")
 import sys as _sys
 _sys.path.insert(0, str(APP_DIR))
 _sys.path.insert(0, str(BACKEND_DIR))
-from auth import get_current_user, get_admin_user
+from auth import get_current_user, get_admin_user, get_expert_user
 from user_db import get_user_costing_db
 
 router = APIRouter()
@@ -597,6 +597,102 @@ def save_to_firebase(row_index: int, user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "saved to Firebase"}
+
+
+@router.post("/tree/{row_index}/deactivate-in-firebase")
+def deactivate_in_firebase(row_index: int, user=Depends(get_expert_user)):
+    db = get_user_costing_db(user["username"])
+    _ensure_tree(db)
+    conn = _get_conn(db)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM tree LIMIT -1 OFFSET ?", (row_index,))
+    row = cur.fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(404, "Row not found")
+
+    d = _row_to_model(row)
+    duration = (d.get("duration") or "").strip()
+    battery_pack = (d.get("battery_pack") or "").strip().lower()
+    partcode = (d.get("partcode") or "").strip().lower()
+    creation_date = (d.get("creation_date") or "").strip().lower()
+    dollar_rate = str(d.get("dollar_rate") or "").strip().lower()
+    created_by = (d.get("created_by") or "").strip().lower()
+
+    if not duration or not battery_pack:
+        raise HTTPException(400, "Row has no duration or battery_pack — cannot match in Firebase")
+
+    try:
+        from firebase_admin import db as fdb
+        ref = fdb.reference(f"products/{duration}")
+        all_products = ref.get()
+    except Exception as e:
+        raise HTTPException(500, f"Firebase error: {e}")
+
+    if not isinstance(all_products, dict):
+        return {"deactivated": 0, "reason": "no products in this duration bucket"}
+
+    # collect only active entries under this duration
+    candidates = [
+        (pid, prod) for pid, prod in all_products.items()
+        if isinstance(prod, dict) and prod.get("active")
+    ]
+
+    def _norm(v) -> str:
+        return str(v or "").strip().lower()
+
+    # tiebreaker chain — narrow until 1 remains or exhausted
+    def _filter(lst, key_fb, local_val):
+        if not local_val:
+            return lst
+        matched = [(pid, p) for pid, p in lst if _norm(p.get(key_fb)) == local_val]
+        return matched if matched else lst  # don't narrow if nothing matches
+
+    candidates = _filter(candidates, "Battery Pack", battery_pack)
+    candidates = _filter(candidates, "Battery Partcode", partcode)
+    candidates = _filter(candidates, "Creation Date", creation_date)
+
+    # dollar rate OR created_by
+    if len(candidates) > 1:
+        by_rate = [
+            (pid, p) for pid, p in candidates
+            if _norm(p.get("Dollar Rate")) == dollar_rate and dollar_rate
+        ]
+        by_creator = [
+            (pid, p) for pid, p in candidates
+            if _norm(p.get("Created By")) == created_by and created_by
+        ]
+        combined = {pid: p for pid, p in by_rate + by_creator}.items()
+        combined = list(combined)
+        if combined:
+            candidates = combined
+
+    # word-similarity tiebreaker on remaining numeric fields
+    if len(candidates) > 1:
+        fb_numeric = [
+            ("FOB Cost Of Cells", "fob_cost"),
+            ("BMS or PCM cost", "bms_pcm_cost"),
+            ("Total Cost of Pack (A)", "total_cost"),
+            ("Cell Capacity", "cell_capacity"),
+            ("Ampheres capacity", "ampere_capacity"),
+        ]
+        def _score(prod: dict) -> int:
+            return sum(
+                1 for fb_key, local_key in fb_numeric
+                if _norm(prod.get(fb_key)) == _norm(d.get(local_key))
+            )
+        candidates = sorted(candidates, key=lambda x: _score(x[1]), reverse=True)
+
+    if not candidates:
+        return {"deactivated": 0, "reason": "no matching active record found"}
+
+    target_pid = candidates[0][0]
+    try:
+        fdb.reference(f"products/{duration}/{target_pid}").update({"active": False})
+    except Exception as e:
+        raise HTTPException(500, f"Firebase update failed: {e}")
+
+    return {"deactivated": 1, "firebase_id": str(target_pid)}
 
 
 class SnapshotLoad(BaseModel):
