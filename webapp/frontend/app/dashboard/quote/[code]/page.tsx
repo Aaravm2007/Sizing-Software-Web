@@ -324,7 +324,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   };
 
   const solCount = (idx: number) =>
-    items.slice(0, idx).filter((i) => i.modular_rack === "-").length + 1;
+    (items ?? []).slice(0, idx).filter((i) => i.modular_rack === "-").length + 1;
 
   return (
     <div className="flex flex-col h-full p-5 gap-4">
@@ -338,9 +338,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
           </span>
           <Button size="sm" onClick={async () => {
             try {
-              const first = items[0];
+              const first = items?.[0];
               const data = { meta: { code, date: first?.date ?? "", customer_name: first?.customer_name ?? "",
-                solution_provider: first?.solution_provider ?? "", format_name: first?.format ?? "High voltage" }, items };
+                solution_provider: first?.solution_provider ?? "", format_name: first?.format ?? "High voltage" }, items: items ?? [] };
               const endpoint = `/api/approvals/${pendingForMe.ticket_id}/${pendingForMe.action === "revise" ? "revise" : "resubmit"}`;
               await api.post(endpoint, { data, message: "" });
               clearPendingAction(); setPendingActionState(null);
@@ -712,7 +712,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
             <Button variant="outline" onClick={() => handleExport("pdf")}>PDF (.pdf)</Button>
             <div className="border-t pt-3 flex flex-col gap-2">
 <Button variant="outline" className="w-full" onClick={() => {
-                const first = items[0];
+                const first = items?.[0];
                 if (!first) { toast.error("No items to submit"); return; }
                 setExportOpen(false);
                 setApprovalItem({ type: "quotation", name: `Quote ${code}`,
