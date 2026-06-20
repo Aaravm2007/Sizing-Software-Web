@@ -406,13 +406,7 @@ export default function SizingFormPage() {
         sizing_project: projectName,
         sizing_sr_no: srNo,
       });
-      localStorage.setItem(`quote_link_${code}`, JSON.stringify({
-        sizing_project: projectName,
-        sizing_sr_no: srNo,
-        costing: selectedCosting,
-        quote_code: code,
-      }));
-      setAddToQuoteOpen(false);
+setAddToQuoteOpen(false);
       toast.success("Added to quote");
       router.push(`/dashboard/quote/${encodeURIComponent(code)}`);
     } catch (e: any) {

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart2, DollarSign, FileText, BookOpen, Layout, FlaskConical, Archive, FolderOpen, ClipboardCheck, ClipboardList } from "lucide-react";
+import { BarChart2, DollarSign, FileText, BookOpen, Layout, FlaskConical, ClipboardCheck, ClipboardList } from "lucide-react";
 import { getUsername, api } from "@/lib/api";
 import { useMe } from "@/lib/use-me";
 
@@ -14,9 +14,7 @@ const SECTIONS = [
   { label: "Datasheet",     href: "/dashboard/datasheet", icon: BookOpen,      desc: "Browse and download product datasheets",                expertOnly: false },
   { label: "GAD",           href: "/dashboard/gad",       icon: Layout,        desc: "Browse and download General Arrangement Drawings",      expertOnly: false },
   { label: "Masters",       href: "/dashboard/formulas",  icon: FlaskConical,  desc: "Edit cell chemistry voltages and DC→Cell mappings",     expertOnly: true  },
-  { label: "Records",       href: "/dashboard/records",   icon: Archive,       desc: "View, restore, and manage saved records",               expertOnly: false },
-  { label: "Project",       href: "/dashboard/project",   icon: FolderOpen,    desc: "Bundle records, datasheets and GADs into projects and export as ZIP", expertOnly: false },
-  { label: "Approvals",     href: "/dashboard/approvals", icon: ClipboardCheck,  desc: "Submit files for expert review or manage incoming requests", expertOnly: false },
+{ label: "Approvals",     href: "/dashboard/approvals", icon: ClipboardCheck,  desc: "Submit files for expert review or manage incoming requests", expertOnly: false },
   { label: "Inquiry Sheet", href: "/dashboard/inquiry",   icon: ClipboardList,   desc: "Track UPS inquiries, quotes, pricing, and document status",  expertOnly: false },
 ];
 

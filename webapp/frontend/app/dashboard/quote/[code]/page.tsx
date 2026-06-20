@@ -92,80 +92,7 @@ export default function QuoteEditorPage() {
   const router = useRouter();
   const qc = useQueryClient();
 
-  // project bundling
-  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
-  const [projectMode, setProjectMode] = useState<"new" | "existing">("new");
-  const [projName, setProjName] = useState("");
-  const [projCustomer, setProjCustomer] = useState("");
-  const [projNickname, setProjNickname] = useState("");
-  const [projDate, setProjDate] = useState("");
-  const [projTime, setProjTime] = useState("");
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [addingToProject, setAddingToProject] = useState(false);
-  const [quoteLink, setQuoteLink] = useState<{sizing_project?:string;sizing_sr_no?:number;costing?:any;quote_code?:string}|null>(null);
-
-  useEffect(() => {
-    const raw = localStorage.getItem(`quote_link_${code}`);
-    if (raw) {
-      try { setQuoteLink(JSON.parse(raw)); } catch {}
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const { data: existingProjects = [] } = useQuery<{id:string;name:string;customer:string}[]>({
-    queryKey: ["projects"],
-    queryFn: () => api.get("/api/projects").then((r) => r.data),
-    enabled: projectDialogOpen && projectMode === "existing",
-  });
-
-  const handleOpenProjectDialog = () => {
-    const now = new Date();
-    setProjName("");
-    setProjCustomer(items[0]?.customer_name ?? "");
-    setProjNickname("");
-    setProjDate(now.toLocaleDateString("en-GB"));
-    setProjTime(now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }));
-    setSelectedProjectId(null);
-    setProjectMode("new");
-    setProjectDialogOpen(true);
-  };
-
-  const handleAddToProject = async () => {
-    setAddingToProject(true);
-    try {
-      const bundle = {
-        quote_code: code,
-        sizing_project: quoteLink?.sizing_project ?? null,
-        sizing_sr_no: quoteLink?.sizing_sr_no ?? null,
-        costing: quoteLink?.costing ?? null,
-      };
-      if (projectMode === "new") {
-        await api.post("/api/projects", {
-          name: projName,
-          customer: projCustomer,
-          nickname: projNickname,
-          date: projDate,
-          time: projTime,
-          bundle,
-        });
-        toast.success(`Project "${projName}" created`);
-      } else {
-        if (!selectedProjectId) return;
-        await api.post(`/api/projects/${selectedProjectId}/bundles`, bundle);
-        toast.success("Added to project");
-      }
-      localStorage.removeItem(`quote_link_${code}`);
-      setQuoteLink(null);
-      setProjectDialogOpen(false);
-      qc.invalidateQueries({ queryKey: ["projects"] });
-    } catch (e: any) {
-      toast.error(apiErr(e, "Failed"));
-    } finally {
-      setAddingToProject(false);
-    }
-  };
-
-  const [addCostingOpen, setAddCostingOpen] = useState(false);
+const [addCostingOpen, setAddCostingOpen] = useState(false);
   const [addModularOpen, setAddModularOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
@@ -775,81 +702,8 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         </DialogContent>
       </Dialog>
 
-      {/* Add to Project Dialog */}
-      <Dialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Add to Project</DialogTitle></DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
-            {/* tabs */}
-            <div className="flex border-b">
-              {(["new", "existing"] as const).map((m) => (
-                <button key={m} onClick={() => setProjectMode(m)}
-                  className={`px-4 py-1.5 text-sm font-medium border-b-2 -mb-px transition-colors ${projectMode === m ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-                  {m === "new" ? "New Project" : "Existing Project"}
-                </button>
-              ))}
-            </div>
 
-            {projectMode === "new" ? (
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1">
-                  <Label>Project Name *</Label>
-                  <Input value={projName} onChange={(e) => setProjName(e.target.value)} placeholder="e.g. ABC Corp Battery Project" />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <Label>Customer Name</Label>
-                  <Input value={projCustomer} onChange={(e) => setProjCustomer(e.target.value)} />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <Label>Nickname <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                  <Input value={projNickname} onChange={(e) => setProjNickname(e.target.value)} placeholder="e.g. Phase 1" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1">
-                    <Label>Date</Label>
-                    <Input value={projDate} onChange={(e) => setProjDate(e.target.value)} placeholder="dd/mm/yyyy" />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label>Time</Label>
-                    <Input value={projTime} onChange={(e) => setProjTime(e.target.value)} placeholder="HH:MM" />
-                  </div>
-                </div>
-                {quoteLink && (
-                  <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground flex flex-col gap-0.5">
-                    <span className="font-medium text-foreground">Will bundle:</span>
-                    <span>Quote: {code}</span>
-                    {quoteLink.sizing_project && <span>Sizing: {quoteLink.sizing_project} Sr. {quoteLink.sizing_sr_no}</span>}
-                    {quoteLink.costing?.partcode && <span>Costing: {quoteLink.costing.partcode}</span>}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {existingProjects.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No projects yet. Create one first.</p>
-                ) : existingProjects.map((p) => (
-                  <div key={p.id}
-                    onClick={() => setSelectedProjectId(p.id)}
-                    className={`px-3 py-2 rounded-md border cursor-pointer text-sm hover:bg-accent ${selectedProjectId === p.id ? "bg-primary/10 border-primary" : ""}`}>
-                    <p className="font-medium">{p.name}</p>
-                    {p.customer && <p className="text-xs text-muted-foreground">{p.customer}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setProjectDialogOpen(false)}>Cancel</Button>
-            <Button
-              disabled={addingToProject || (projectMode === "new" ? !projName.trim() : !selectedProjectId)}
-              onClick={handleAddToProject}>
-              {addingToProject ? "Saving…" : projectMode === "new" ? "Create & Add" : "Add to Project"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Export Dialog */}
+{/* Export Dialog */}
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="sm:max-w-xs">
           <DialogHeader><DialogTitle>Export Quote</DialogTitle></DialogHeader>
@@ -857,11 +711,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
             <Button onClick={() => handleExport("word")}>Word (.docx)</Button>
             <Button variant="outline" onClick={() => handleExport("pdf")}>PDF (.pdf)</Button>
             <div className="border-t pt-3 flex flex-col gap-2">
-              <Button variant="outline" className="w-full" onClick={() => {
-                setExportOpen(false);
-                handleOpenProjectDialog();
-              }}>Add to Project</Button>
-              <Button variant="outline" className="w-full" onClick={() => {
+<Button variant="outline" className="w-full" onClick={() => {
                 const first = items[0];
                 if (!first) { toast.error("No items to submit"); return; }
                 setExportOpen(false);

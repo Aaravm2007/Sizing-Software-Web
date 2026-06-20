@@ -7,7 +7,7 @@ import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, BarChart2, DollarSign, FileText, BookOpen,
-  Layout, LogOut, FlaskConical, Sun, Moon, FolderOpen, ClipboardCheck, ShieldCheck, Wand2, ClipboardList,
+  Layout, LogOut, FlaskConical, Sun, Moon, ClipboardCheck, ShieldCheck, Wand2, ClipboardList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -23,8 +23,7 @@ const NAV = [
   { label: "Datasheet", href: "/dashboard/datasheet", icon: BookOpen,      expertOnly: false },
   { label: "GAD",       href: "/dashboard/gad",       icon: Layout,        expertOnly: false },
   { label: "Masters",   href: "/dashboard/formulas",  icon: FlaskConical,  expertOnly: true  },
-  { label: "Project",   href: "/dashboard/project",   icon: FolderOpen,    expertOnly: false },
-  { label: "Approvals", href: "/dashboard/approvals", icon: ClipboardCheck, expertOnly: false },
+{ label: "Approvals", href: "/dashboard/approvals", icon: ClipboardCheck, expertOnly: false },
   { label: "Inquiry",   href: "/dashboard/inquiry",   icon: ClipboardList,  expertOnly: false },
   { label: "Wizard",    href: "/dashboard/wizard",    icon: Wand2,          expertOnly: false },
   { label: "Admin",     href: "/dashboard/admin",     icon: ShieldCheck,   expertOnly: true  },
