@@ -238,7 +238,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       qc.invalidateQueries({ queryKey: qKey });
     } catch (e: any) {
       toast.error(apiErr(e, "Reorder failed"));
-      setLocalItems(items);
+      setLocalItems(items ?? []);
     }
   };
 
