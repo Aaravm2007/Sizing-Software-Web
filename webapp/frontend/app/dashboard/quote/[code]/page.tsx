@@ -127,7 +127,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const [metaCode, setMetaCode] = useState("");
 
   const openEditMeta = async () => {
-    const first = items[0];
+    const first = items?.[0];
     setMetaCustomer(first?.customer_name ?? "");
     setMetaProvider(first?.solution_provider ?? "");
     setMetaDate(first?.date ?? "");
