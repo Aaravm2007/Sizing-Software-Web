@@ -401,6 +401,8 @@ export default function SizingFormPage() {
         actual_load_kw: parseFloat(form.actual_load_kw) || 0,
         ups_rating_kva: parseFloat(form.ups_rating_kva) || 0,
         calculated_load_kw: parseFloat(form.calculated_load_kw) || 0,
+        ageing_type: form.ageing_type || "BOL",
+        backup_time_min: form.backup_time_min || form.backup_requirement_min,
         sizing_project: projectName,
         sizing_sr_no: srNo,
       });
