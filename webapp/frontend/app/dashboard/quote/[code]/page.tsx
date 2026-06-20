@@ -262,8 +262,8 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       price_option: priceOption,
       quantity: parseInt(qty) || 1,
       custom_pct: parseFloat(customPct) || 0,
-      sizing_project: quoteLink?.sizing_project ?? "",
-      sizing_sr_no: quoteLink?.sizing_sr_no ?? 0,
+      sizing_project: "",
+      sizing_sr_no: 0,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qKey });
