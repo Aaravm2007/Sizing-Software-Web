@@ -20,6 +20,7 @@ interface Col {
 }
 
 const COLS: Col[] = [
+  { key: "inquiry_code",      label: "Inquiry Code",       width: 120, type: "text"   },
   { key: "inquiry_date",      label: "Inquiry Date",       width: 110, type: "date"   },
   { key: "type",               label: "Type",               width: 160, type: "text"   },
   { key: "sales_person",      label: "Sales Person",       width: 130, type: "text"   },
@@ -60,9 +61,7 @@ const COLS: Col[] = [
   { key: "battery_compliance",label: "Bat. Compliance",    width: 115, type: "yn"     },
   { key: "warranty",          label: "Warranty",           width: 100, type: "text"   },
   { key: "remarks",           label: "Remarks",            width: 210, type: "text"   },
-  { key: "solution_by",       label: "Solution By",        width: 110, type: "text"   },
-  { key: "entry_by",          label: "Entry By",           width: 100, type: "text"   },
-  { key: "data_upload_by",    label: "Upload By",          width: 100, type: "text"   },
+  { key: "handled_by",        label: "Handled By",         width: 110, type: "text"   },
   { key: "submission_date",   label: "Submission Date",    width: 110, type: "date"   },
   { key: "submitted_to",      label: "Submitted To",       width: 160, type: "text"   },
 ];
@@ -113,6 +112,12 @@ export default function InquiryPage() {
   });
   const isExpert = me?.role === "e";
 
+  const { data: inquiryCodeHint, refetch: refetchCodeHint } = useQuery<{ last: string; suggestion: string }>({
+    queryKey: ["inquiry-next-inquiry-code"],
+    queryFn: () => api.get("/api/inquiry/next-inquiry-code").then(r => r.data),
+    enabled: false,
+  });
+
   // editing state: { id, key } | null
   const [editing, setEditing] = useState<{ id: string; key: string } | null>(null);
   const [editVal, setEditVal] = useState("");
@@ -146,6 +151,7 @@ export default function InquiryPage() {
     commitEdit();
     setEditing({ id, key });
     setEditVal(currentVal);
+    if (key === "inquiry_code") refetchCodeHint();
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
@@ -254,8 +260,8 @@ export default function InquiryPage() {
 
                   return (
                     <td key={col.key}
-                      className={cn("border border-muted px-0 py-0", canEdit && "cursor-text")}
-                      onClick={() => canEdit && !isEditing && startEdit(row._id, col.key, val)}>
+                      className={cn("border border-muted px-0 py-0 relative", canEdit && "cursor-text")}
+                      onClick={() => canEdit && col.key !== "handled_by" && !isEditing && startEdit(row._id, col.key, val)}>
                       {isEditing ? (
                         <input
                           ref={inputRef}
@@ -273,6 +279,15 @@ export default function InquiryPage() {
                         <div className="px-1.5 py-1 min-h-[26px] truncate">
                           {displayVal(col, val)}
                         </div>
+                      )}
+                      {isEditing && col.key === "inquiry_code" && inquiryCodeHint?.suggestion && !editVal && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); setEditVal(inquiryCodeHint!.suggestion); }}
+                          className="absolute left-0 top-full mt-0.5 z-50 bg-background border rounded px-2 py-1 text-[10px] text-primary shadow whitespace-nowrap hover:bg-accent"
+                        >
+                          Suggested: {inquiryCodeHint.suggestion}
+                        </button>
                       )}
                     </td>
                   );

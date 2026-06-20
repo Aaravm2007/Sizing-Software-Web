@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -5,7 +6,7 @@ from pathlib import Path
 _DB_PATH = str(Path(__file__).parent.parent.parent / "data" / "inquiry.db")
 
 _COLS = [
-    "sr_no", "inquiry_date", "type", "sales_person", "solution_provider",
+    "sr_no", "inquiry_code", "inquiry_date", "type", "sales_person", "solution_provider",
     "project_customer", "ups_make", "ups_model", "ups_kva", "actual_load_kva",
     "load_kw", "power_factor", "inverter_efficiency", "dc_voltage", "backup_min",
     "cell_chemistry", "ageing_pct", "design_margin_pct", "dod_margin_pct",
@@ -13,7 +14,7 @@ _COLS = [
     "qty_system", "rate_system", "price_system", "rack_dim", "qty",
     "per_rack_price", "price", "custom_cost_desc", "custom_cost_price",
     "datasheet", "sizing_sheet", "gad", "battery_compliance", "warranty",
-    "remarks", "solution_by", "entry_by", "data_upload_by",
+    "remarks", "handled_by",
     "submission_date", "submitted_to", "created_at", "quote_code", "sol_no",
 ]
 
@@ -34,11 +35,29 @@ def init_inquiry_db(db_path=None):
         c.execute('CREATE TABLE IF NOT EXISTS inquiry_meta (next_id INTEGER DEFAULT 1)')
         if not c.execute('SELECT 1 FROM inquiry_meta').fetchone():
             c.execute('INSERT INTO inquiry_meta VALUES (1)')
-        for col in ["quote_code", "sol_no", "ageing_type", "backup_time_min"]:
+        for col in ["quote_code", "sol_no", "ageing_type", "backup_time_min", "inquiry_code", "handled_by"]:
             try:
                 c.execute(f'ALTER TABLE inquiry ADD COLUMN "{col}" TEXT')
             except Exception:
                 pass
+
+
+def suggest_next_inquiry_code(db_path=None) -> dict:
+    init_inquiry_db(db_path)
+    with _conn(db_path) as c:
+        row = c.execute(
+            "SELECT inquiry_code FROM inquiry WHERE inquiry_code IS NOT NULL AND inquiry_code != '' ORDER BY sr_no DESC LIMIT 1"
+        ).fetchone()
+    last = dict(row)["inquiry_code"] if row else ""
+    if not last:
+        return {"last": "", "suggestion": ""}
+    m = re.match(r"^(.*?)(\d+)$", last)
+    if m:
+        prefix, num = m.group(1), m.group(2)
+        suggestion = f"{prefix}{str(int(num) + 1).zfill(len(num))}"
+    else:
+        suggestion = last + "1"
+    return {"last": last, "suggestion": suggestion}
 
 
 def _next_sr(db_path=None) -> int:

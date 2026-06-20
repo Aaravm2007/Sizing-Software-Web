@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from auth import get_current_user, get_expert_user
-from inquiry_db import push_row, list_rows, update_row, delete_row, init_inquiry_db
+from inquiry_db import push_row, list_rows, update_row, delete_row, init_inquiry_db, suggest_next_inquiry_code
 from user_db import get_user_inquiry_db
 
 init_inquiry_db()
@@ -15,6 +15,7 @@ router = APIRouter()
 
 
 class InquiryEntry(BaseModel):
+    inquiry_code: str = ""
     inquiry_date: str = ""
     type: str = ""
     sales_person: str = ""
@@ -55,9 +56,12 @@ class InquiryEntry(BaseModel):
     battery_compliance: str = "NO"
     warranty: str = "5 year"
     remarks: str = ""
-    solution_by: str = ""
-    entry_by: str = ""
-    data_upload_by: str = ""
+    handled_by: str = ""
+
+
+@router.get("/next-inquiry-code")
+def next_inquiry_code(_=Depends(get_current_user)):
+    return suggest_next_inquiry_code()
 
 
 @router.get("/mine")
@@ -73,8 +77,10 @@ def list_entries(_=Depends(get_current_user)):
 
 
 @router.post("", status_code=201)
-def create_entry(body: InquiryEntry, _=Depends(get_current_user)):
-    sr = push_row(body.dict())
+def create_entry(body: InquiryEntry, user=Depends(get_current_user)):
+    data = body.dict()
+    data["handled_by"] = user["username"]
+    sr = push_row(data)
     return {"sr_no": sr}
 
 

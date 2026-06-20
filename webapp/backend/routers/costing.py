@@ -1182,151 +1182,153 @@ def mass_update_preview(_=Depends(get_current_user)):
         raise HTTPException(503, str(e))
 
 
-@router.get("/export")
-def export_costing(user=Depends(get_current_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    try:
-        import openpyxl
-        wb = openpyxl.load_workbook(TEMPLATE)
-        ws = wb.active
-
-        conn = _get_conn(db)
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM tree")
-        rows = cur.fetchall()
-        conn.close()
-
-        for c_idx, row in enumerate(rows, start=2):
-            for r_idx, val in enumerate(row, start=3):
-                ws.cell(row=r_idx, column=c_idx).value = val
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        wb.save(tmp.name)
-        return FileResponse(
-            tmp.name,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename="costing_export.xlsx",
-        )
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-class WizardCostingExportBody(BaseModel):
-    rows: list[dict]
-    project_name: str = ""
+# COSTING EXPORT DISABLED — do not re-enable without authorisation
+# @router.get("/export")
+# def export_costing(user=Depends(get_current_user)):
+#     db = get_user_costing_db(user["username"])
+#     _ensure_tree(db)
+#     try:
+#         import openpyxl
+#         wb = openpyxl.load_workbook(TEMPLATE)
+#         ws = wb.active
+#
+#         conn = _get_conn(db)
+#         cur = conn.cursor()
+#         cur.execute("SELECT * FROM tree")
+#         rows = cur.fetchall()
+#         conn.close()
+#
+#         for c_idx, row in enumerate(rows, start=2):
+#             for r_idx, val in enumerate(row, start=3):
+#                 ws.cell(row=r_idx, column=c_idx).value = val
+#
+#         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+#         wb.save(tmp.name)
+#         return FileResponse(
+#             tmp.name,
+#             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+#             filename="costing_export.xlsx",
+#         )
+#     except Exception as e:
+#         raise HTTPException(500, str(e))
 
 
-def _build_wizard_costing_excel(body: "WizardCostingExportBody") -> str:
-    import openpyxl
-    wb = openpyxl.load_workbook(TEMPLATE)
-    ws = wb.active
-
-    for c_idx, r in enumerate(body.rows, start=2):
-        cr = CostingRow(
-            duration=r.get("duration", ""),
-            battery_pack=r.get("battery_pack", ""),
-            voltage=r.get("voltage", 0),
-            ampere_capacity=r.get("ampere_capacity", 0),
-            kw_calculation=r.get("kw_calculation", 0),
-            cell_voltage=r.get("cell_voltage", 0),
-            cell_capacity=r.get("cell_capacity", 0),
-            cells_in_series=r.get("cells_in_series", 0),
-            cells_in_parallel=r.get("cells_in_parallel", 0),
-            total_cells=r.get("total_cells", 0),
-            fob_cost=r.get("fob_cost", 0),
-            total_fob=r.get("total_fob", 0),
-            clearing_customs_1=r.get("clearing_customs_1", 0),
-            total_landed_1=r.get("total_landed_1", 0),
-            cost_inr_1=r.get("cost_inr_1", 0),
-            bms_pcm_cost=r.get("bms_pcm_cost", 0),
-            clearing_customs_2=r.get("clearing_customs_2", 0),
-            total_landed_2=r.get("total_landed_2", 0),
-            cost_inr_2=r.get("cost_inr_2", 0),
-            cabinet=r.get("cabinet", 0),
-            bus_bar=r.get("bus_bar", 0),
-            holder_caps=r.get("holder_caps", 0),
-            wire_gasket=r.get("wire_gasket", 0),
-            terminals=r.get("terminals", 0),
-            mcb_fuse=r.get("mcb_fuse", 0),
-            lugs_slew=r.get("lugs_slew", 0),
-            nut_bolts=r.get("nut_bolts", 0),
-            fiber_glass=r.get("fiber_glass", 0),
-            awg_cables=r.get("awg_cables", 0),
-            shipping=r.get("shipping", 0),
-            packaging=r.get("packaging", 0),
-            total_other=r.get("total_other", 0),
-            landing_cost=r.get("landing_cost", 0),
-            labour=r.get("labour", 0),
-            warranty=r.get("warranty", 0),
-            total_cost=r.get("total_cost", 0),
-            margin_10=r.get("margin_10", 0),
-            est_sales_b=r.get("est_sales_b", 0),
-            margin_15=r.get("margin_15", 0),
-            est_sales_b5=r.get("est_sales_b5", 0),
-            per_kw_cost=r.get("per_kw_cost", 0),
-            per_kw_profit1=r.get("per_kw_profit1") or r.get("per_kw_b", 0),
-            per_kw_profit2=r.get("per_kw_profit2") or r.get("per_kw_b5", 0),
-            bms_pcm_type=r.get("bms_pcm_type") or r.get("bms_pcm", ""),
-            cell_chemistry=r.get("cell_chemistry", ""),
-            centre_tap=r.get("centre_tap", ""),
-            cell_type=r.get("cell_type", ""),
-            application=r.get("application", ""),
-            enclosure=r.get("enclosure", ""),
-            mount=r.get("mount", ""),
-            brand=r.get("brand", ""),
-            installation=r.get("installation", ""),
-            partcode=r.get("partcode", ""),
-            dollar_rate=r.get("dollar_rate", ""),
-            creation_date=r.get("creation_date", ""),
-            created_by=r.get("created_by", ""),
-        )
-        for r_idx, val in enumerate(_model_to_values(cr), start=3):
-            ws.cell(row=r_idx, column=c_idx).value = val
-
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    wb.save(tmp.name)
-    return tmp.name
-
-
-@router.post("/export-wizard")
-def export_costing_wizard(body: WizardCostingExportBody, user=Depends(get_current_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    try:
-        xlsx_path = _build_wizard_costing_excel(body)
-        fname = f"{body.project_name or 'costing'}_costing.xlsx"
-        return FileResponse(xlsx_path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            filename=fname)
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-@router.post("/export-wizard/pdf")
-def export_costing_wizard_pdf(body: WizardCostingExportBody, user=Depends(get_current_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    try:
-        xlsx_path = _build_wizard_costing_excel(body)
-        pdf_path = xlsx_path.replace(".xlsx", ".pdf")
-        import win32com.client
-        excel = win32com.client.Dispatch("Excel.Application")
-        excel.Visible = False
-        excel.DisplayAlerts = False
-        try:
-            wb = excel.Workbooks.Open(os.path.abspath(xlsx_path))
-            for sheet in wb.Sheets:
-                sheet.PageSetup.Zoom = False
-                sheet.PageSetup.FitToPagesWide = 1
-                sheet.PageSetup.FitToPagesTall = False
-            wb.ExportAsFixedFormat(0, os.path.abspath(pdf_path))
-            wb.Close(False)
-        finally:
-            excel.Quit()
-        os.unlink(xlsx_path)
-    except ImportError:
-        raise HTTPException(501, "PDF export requires Microsoft Excel installed on the server")
-    except Exception as e:
-        raise HTTPException(500, str(e))
-    fname = f"{body.project_name or 'costing'}_costing.pdf"
-    return FileResponse(pdf_path, media_type="application/pdf", filename=fname)
+# COSTING EXPORT DISABLED — do not re-enable without authorisation
+# class WizardCostingExportBody(BaseModel):
+#     rows: list[dict]
+#     project_name: str = ""
+#
+#
+# def _build_wizard_costing_excel(body: "WizardCostingExportBody") -> str:
+#     import openpyxl
+#     wb = openpyxl.load_workbook(TEMPLATE)
+#     ws = wb.active
+#
+#     for c_idx, r in enumerate(body.rows, start=2):
+#         cr = CostingRow(
+#             duration=r.get("duration", ""),
+#             battery_pack=r.get("battery_pack", ""),
+#             voltage=r.get("voltage", 0),
+#             ampere_capacity=r.get("ampere_capacity", 0),
+#             kw_calculation=r.get("kw_calculation", 0),
+#             cell_voltage=r.get("cell_voltage", 0),
+#             cell_capacity=r.get("cell_capacity", 0),
+#             cells_in_series=r.get("cells_in_series", 0),
+#             cells_in_parallel=r.get("cells_in_parallel", 0),
+#             total_cells=r.get("total_cells", 0),
+#             fob_cost=r.get("fob_cost", 0),
+#             total_fob=r.get("total_fob", 0),
+#             clearing_customs_1=r.get("clearing_customs_1", 0),
+#             total_landed_1=r.get("total_landed_1", 0),
+#             cost_inr_1=r.get("cost_inr_1", 0),
+#             bms_pcm_cost=r.get("bms_pcm_cost", 0),
+#             clearing_customs_2=r.get("clearing_customs_2", 0),
+#             total_landed_2=r.get("total_landed_2", 0),
+#             cost_inr_2=r.get("cost_inr_2", 0),
+#             cabinet=r.get("cabinet", 0),
+#             bus_bar=r.get("bus_bar", 0),
+#             holder_caps=r.get("holder_caps", 0),
+#             wire_gasket=r.get("wire_gasket", 0),
+#             terminals=r.get("terminals", 0),
+#             mcb_fuse=r.get("mcb_fuse", 0),
+#             lugs_slew=r.get("lugs_slew", 0),
+#             nut_bolts=r.get("nut_bolts", 0),
+#             fiber_glass=r.get("fiber_glass", 0),
+#             awg_cables=r.get("awg_cables", 0),
+#             shipping=r.get("shipping", 0),
+#             packaging=r.get("packaging", 0),
+#             total_other=r.get("total_other", 0),
+#             landing_cost=r.get("landing_cost", 0),
+#             labour=r.get("labour", 0),
+#             warranty=r.get("warranty", 0),
+#             total_cost=r.get("total_cost", 0),
+#             margin_10=r.get("margin_10", 0),
+#             est_sales_b=r.get("est_sales_b", 0),
+#             margin_15=r.get("margin_15", 0),
+#             est_sales_b5=r.get("est_sales_b5", 0),
+#             per_kw_cost=r.get("per_kw_cost", 0),
+#             per_kw_profit1=r.get("per_kw_profit1") or r.get("per_kw_b", 0),
+#             per_kw_profit2=r.get("per_kw_profit2") or r.get("per_kw_b5", 0),
+#             bms_pcm_type=r.get("bms_pcm_type") or r.get("bms_pcm", ""),
+#             cell_chemistry=r.get("cell_chemistry", ""),
+#             centre_tap=r.get("centre_tap", ""),
+#             cell_type=r.get("cell_type", ""),
+#             application=r.get("application", ""),
+#             enclosure=r.get("enclosure", ""),
+#             mount=r.get("mount", ""),
+#             brand=r.get("brand", ""),
+#             installation=r.get("installation", ""),
+#             partcode=r.get("partcode", ""),
+#             dollar_rate=r.get("dollar_rate", ""),
+#             creation_date=r.get("creation_date", ""),
+#             created_by=r.get("created_by", ""),
+#         )
+#         for r_idx, val in enumerate(_model_to_values(cr), start=3):
+#             ws.cell(row=r_idx, column=c_idx).value = val
+#
+#     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+#     wb.save(tmp.name)
+#     return tmp.name
+#
+#
+# @router.post("/export-wizard")
+# def export_costing_wizard(body: WizardCostingExportBody, user=Depends(get_current_user)):
+#     db = get_user_costing_db(user["username"])
+#     _ensure_tree(db)
+#     try:
+#         xlsx_path = _build_wizard_costing_excel(body)
+#         fname = f"{body.project_name or 'costing'}_costing.xlsx"
+#         return FileResponse(xlsx_path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+#                             filename=fname)
+#     except Exception as e:
+#         raise HTTPException(500, str(e))
+#
+#
+# @router.post("/export-wizard/pdf")
+# def export_costing_wizard_pdf(body: WizardCostingExportBody, user=Depends(get_current_user)):
+#     db = get_user_costing_db(user["username"])
+#     _ensure_tree(db)
+#     try:
+#         xlsx_path = _build_wizard_costing_excel(body)
+#         pdf_path = xlsx_path.replace(".xlsx", ".pdf")
+#         import win32com.client
+#         excel = win32com.client.Dispatch("Excel.Application")
+#         excel.Visible = False
+#         excel.DisplayAlerts = False
+#         try:
+#             wb = excel.Workbooks.Open(os.path.abspath(xlsx_path))
+#             for sheet in wb.Sheets:
+#                 sheet.PageSetup.Zoom = False
+#                 sheet.PageSetup.FitToPagesWide = 1
+#                 sheet.PageSetup.FitToPagesTall = False
+#             wb.ExportAsFixedFormat(0, os.path.abspath(pdf_path))
+#             wb.Close(False)
+#         finally:
+#             excel.Quit()
+#         os.unlink(xlsx_path)
+#     except ImportError:
+#         raise HTTPException(501, "PDF export requires Microsoft Excel installed on the server")
+#     except Exception as e:
+#         raise HTTPException(500, str(e))
+#     fname = f"{body.project_name or 'costing'}_costing.pdf"
+#     return FileResponse(pdf_path, media_type="application/pdf", filename=fname)

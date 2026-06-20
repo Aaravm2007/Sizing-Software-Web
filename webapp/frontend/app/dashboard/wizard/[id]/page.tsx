@@ -363,30 +363,30 @@ export default function WizardComparePage() {
   const handleExportSizing    = () => _doExportSizing("xlsx");
   const handleExportSizingPdf = () => _doExportSizing("pdf");
 
-  // ── export costing ────────────────────────────────────────────────────────
-  const _doExportCosting = async (fmt: "xlsx" | "pdf") => {
-    const activePairs2 = cols
-      .map((col, i) => ({ col, i, row: col.costing_rows[resultIdx[i] ?? 0] }))
-      .filter(({ col, row }) => col.offered_battery_config && col.offered_battery_config !== "—" && row);
-    if (!activePairs2.length) { toast.warning("No costing results to export"); return; }
-    const endpoint = fmt === "pdf" ? "/api/costing/export-wizard/pdf" : "/api/costing/export-wizard";
-    try {
-      const res = await api.post(endpoint, {
-        project_name: projectName,
-        rows: activePairs2.map(p => p.row),
-      }, { responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${projectName}_costing.${fmt}`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (e: any) {
-      toast.error(apiErr(e, "Export failed"));
-    }
-  };
-  const handleExportCosting    = () => _doExportCosting("xlsx");
-  const handleExportCostingPdf = () => _doExportCosting("pdf");
+  // COSTING EXPORT DISABLED — do not re-enable without authorisation
+  // const _doExportCosting = async (fmt: "xlsx" | "pdf") => {
+  //   const activePairs2 = cols
+  //     .map((col, i) => ({ col, i, row: col.costing_rows[resultIdx[i] ?? 0] }))
+  //     .filter(({ col, row }) => col.offered_battery_config && col.offered_battery_config !== "—" && row);
+  //   if (!activePairs2.length) { toast.warning("No costing results to export"); return; }
+  //   const endpoint = fmt === "pdf" ? "/api/costing/export-wizard/pdf" : "/api/costing/export-wizard";
+  //   try {
+  //     const res = await api.post(endpoint, {
+  //       project_name: projectName,
+  //       rows: activePairs2.map(p => p.row),
+  //     }, { responseType: "blob" });
+  //     const url = window.URL.createObjectURL(new Blob([res.data]));
+  //     const a = document.createElement("a");
+  //     a.href = url;
+  //     a.download = `${projectName}_costing.${fmt}`;
+  //     a.click();
+  //     window.URL.revokeObjectURL(url);
+  //   } catch (e: any) {
+  //     toast.error(apiErr(e, "Export failed"));
+  //   }
+  // };
+  // const handleExportCosting    = () => _doExportCosting("xlsx");
+  // const handleExportCostingPdf = () => _doExportCosting("pdf");
 
   const handleAddCol = () => {
     setCols(prev => [...prev, EMPTY_COL()]);
@@ -450,7 +450,8 @@ export default function WizardComparePage() {
             Calculate Costing
           </Button>
         )}
-        {calcDone && costingDone && showCosting && (
+        {/* COSTING EXPORT DISABLED — do not re-enable without authorisation */}
+        {/* {calcDone && costingDone && showCosting && (
           <>
             <Button variant="outline" size="sm" onClick={handleExportCosting} className="gap-1.5">
               <Download className="h-3.5 w-3.5" />
@@ -461,7 +462,7 @@ export default function WizardComparePage() {
               Costing PDF
             </Button>
           </>
-        )}
+        )} */}
       </div>
 
       {/* ── Shared fields — fixed, never scrolls ── */}

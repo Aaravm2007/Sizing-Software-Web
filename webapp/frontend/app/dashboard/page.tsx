@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart2, DollarSign, FileText, BookOpen, Layout, FlaskConical, ClipboardCheck, ClipboardList } from "lucide-react";
+import { BarChart2, DollarSign, FileText, BookOpen, Layout, FlaskConical, ClipboardCheck, ClipboardList, Clock } from "lucide-react";
 import { getUsername, api } from "@/lib/api";
 import { useMe } from "@/lib/use-me";
 
@@ -16,6 +16,7 @@ const SECTIONS = [
   { label: "Masters",       href: "/dashboard/formulas",  icon: FlaskConical,  desc: "Edit cell chemistry voltages and DC→Cell mappings",     expertOnly: true  },
 { label: "Approvals",     href: "/dashboard/approvals", icon: ClipboardCheck,  desc: "Submit files for expert review or manage incoming requests", expertOnly: false },
   { label: "Inquiry Sheet", href: "/dashboard/inquiry",   icon: ClipboardList,   desc: "Track UPS inquiries, quotes, pricing, and document status",  expertOnly: false },
+  { label: "Pending Sheet", href: "/dashboard/pending",   icon: Clock,           desc: "Track assigned pending inquiries and their submission status", expertOnly: false },
 ];
 
 const STATUS_COLORS: Record<string, string> = {

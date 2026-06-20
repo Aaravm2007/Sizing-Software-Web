@@ -295,16 +295,17 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     onError: (e: any) => toast.error(apiErr(e, "Clear failed")),
   });
 
-  const handleExport = () => {
-    api.get("/api/costing/export", { responseType: "blob" }).then((res) => {
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "costing_export.xlsx";
-      a.click();
-      window.URL.revokeObjectURL(url);
-    }).catch(() => toast.error("Export failed"));
-  };
+  // COSTING EXPORT DISABLED — do not re-enable without authorisation
+  // const handleExport = () => {
+  //   api.get("/api/costing/export", { responseType: "blob" }).then((res) => {
+  //     const url = window.URL.createObjectURL(new Blob([res.data]));
+  //     const a = document.createElement("a");
+  //     a.href = url;
+  //     a.download = "costing_export.xlsx";
+  //     a.click();
+  //     window.URL.revokeObjectURL(url);
+  //   }).catch(() => toast.error("Export failed"));
+  // };
 
   const handleSearch = () => {
     if (!batteryConfig.trim() || !duration.trim()) {
@@ -406,7 +407,8 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         <Button variant="outline" onClick={() => router.push("/dashboard/costing/mass-update")}>
           Mass Cost Update
         </Button>
-        <Button variant="outline" onClick={handleExport}>Export Costing</Button>
+        {/* COSTING EXPORT DISABLED — do not re-enable without authorisation */}
+        {/* <Button variant="outline" onClick={handleExport}>Export Costing</Button> */}
         <Button variant="outline" onClick={async () => {
           try {
             const treeRes = await api.get("/api/costing/tree");
