@@ -103,7 +103,7 @@ const COLS: { key: string; label: string; w: number; filterType?: "text" | "sele
   { key: "days_late",                label: "Days Left",                w: 90  },
 ];
 
-const PO_FIELDS: { key: keyof typeof EMPTY_PO; label: string; type?: string; span?: boolean }[] = [
+const PO_FIELDS: { key: keyof typeof EMPTY_PO; label: string; type?: string; span?: boolean; readonly?: boolean }[] = [
   { key: "inquiry_code",         label: "Inquiry Code", readonly: true },
   { key: "customer_name",        label: "Customer Name",          span: true },
   { key: "project_name",         label: "Project / End Customer", span: true },
