@@ -462,12 +462,8 @@ def unlink_export(body: UnlinkBody, user=Depends(get_current_user)):
     return {"detail": "unlinked"}
 
 
-class DeleteExportBody(BaseModel):
-    pending_code: str
-    export_id: int
-
-@router.delete("/my-exports")
-def delete_export_entry(body: DeleteExportBody, user=Depends(get_current_user)):
+@router.delete("/my-exports/{export_id}")
+def delete_export_entry(export_id: int, pending_code: str, user=Depends(get_current_user)):
     db_path = get_user_pending_db(user["username"])
-    delete_export(body.pending_code, body.export_id, db_path)
+    delete_export(pending_code, export_id, db_path)
     return {"detail": "deleted"}

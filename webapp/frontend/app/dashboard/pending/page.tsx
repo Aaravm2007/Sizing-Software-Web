@@ -672,7 +672,7 @@ export default function PendingPage() {
   const deleteExportMut = useMutation({
     mutationFn: (exportId: number) => {
       const pendingCode = detailRow?.inquiry_code || String(detailRow?.sr_no ?? "");
-      return api.delete("/api/pending/my-exports", { data: { pending_code: pendingCode, export_id: exportId } });
+      return api.delete(`/api/pending/my-exports/${exportId}?pending_code=${encodeURIComponent(pendingCode)}`);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pending-exports", detailCode, historySource] });
