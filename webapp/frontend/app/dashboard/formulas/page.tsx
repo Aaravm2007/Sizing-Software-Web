@@ -4,7 +4,8 @@ import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Archive, Plus, Trash2, Pencil, Check, Upload, X } from "lucide-react";
-import { api, getUsername , apiErr } from "@/lib/api";
+import { api, apiErr } from "@/lib/api";
+import { useMe } from "@/lib/use-me";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,7 +40,6 @@ interface DcCell {
   num_cells: number;
 }
 
-const isAdmin = () => getUsername() === "a";
 
 // ── Cell Voltages table ────────────────────────────────────────────────────────
 
@@ -73,9 +73,9 @@ function CellVoltagesTable() {
     onError: (e: any) => toast.error(apiErr(e, "Delete failed")),
   });
 
+  const { isExpert: admin } = useMe();
   const startEdit = (row: CellVoltage) => { setEditKey(row.chemistry); setEditRow({ ...row }); };
   const cancelEdit = () => { setEditKey(null); setEditRow(null); };
-  const admin = isAdmin();
   const canAdd = newRow.chemistry.trim().length > 0;
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -202,9 +202,9 @@ function DcCellsTable() {
     onError: (e: any) => toast.error(apiErr(e, "Delete failed")),
   });
 
+  const { isExpert: admin } = useMe();
   const startEdit = (row: DcCell) => { setEditKey(row.dc_voltage); setEditRow({ ...row }); };
   const cancelEdit = () => { setEditKey(null); setEditRow(null); };
-  const admin = isAdmin();
   const canAdd = newRow.dc_voltage > 0 && newRow.num_cells > 0;
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
