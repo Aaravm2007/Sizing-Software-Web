@@ -24,15 +24,17 @@ def init_temp_db(db_path=None):
                customer_name text,
                solution_provider text,
                format text,
-               sales_person text DEFAULT ''
+               sales_person text DEFAULT '',
+               dollar_rate text DEFAULT '',
+               warranty_years text DEFAULT '5'
               )""")
     conn.commit()
-    # migrate existing DBs that lack the column
-    try:
-        c.execute("ALTER TABLE active_quotes ADD COLUMN sales_person text DEFAULT ''")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  # column already exists
+    for col, default in [("sales_person", "''"), ("dollar_rate", "''"), ("warranty_years", "'5'")]:
+        try:
+            c.execute(f"ALTER TABLE active_quotes ADD COLUMN {col} text DEFAULT {default}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     conn.close()
 
 # Initialize on import (desktop app path)
@@ -82,16 +84,16 @@ def create_quote_table(code, db_path=None):
     conn.commit()
     conn.close()
 
-def add_new_quote(code, date, customer_name, solution_provider, format_template, db_path=None, sales_person=""):
+def add_new_quote(code, date, customer_name, solution_provider, format_template, db_path=None, sales_person="", dollar_rate="", warranty_years="5"):
     conn = get_db_connection(db_path)
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO active_quotes (code, date, customer_name, solution_provider, format, sales_person) VALUES (?, ?, ?, ?, ?, ?)",
-                  (code, date, customer_name, solution_provider, format_template, sales_person))
+        c.execute("INSERT INTO active_quotes (code, date, customer_name, solution_provider, format, sales_person, dollar_rate, warranty_years) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                  (code, date, customer_name, solution_provider, format_template, sales_person, dollar_rate, str(warranty_years)))
         conn.commit()
     except sqlite3.IntegrityError:
-        c.execute("UPDATE active_quotes SET date=?, customer_name=?, solution_provider=?, format=?, sales_person=? WHERE code=?",
-                  (date, customer_name, solution_provider, format_template, sales_person, code))
+        c.execute("UPDATE active_quotes SET date=?, customer_name=?, solution_provider=?, format=?, sales_person=?, dollar_rate=?, warranty_years=? WHERE code=?",
+                  (date, customer_name, solution_provider, format_template, sales_person, dollar_rate, str(warranty_years), code))
         conn.commit()
     conn.close()
     create_quote_table(code, db_path)

@@ -518,7 +518,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       )}
 
       <Dialog open={pwDialogOpen} onOpenChange={(o) => { if (!o) { setPwDialogOpen(false); setPwValue(""); setPendingSaveIdx(null); setPendingDeactivateIdx(null); setPwMode("save"); } }}>
-        <DialogContent className="sm:max-w-xs">
+        <DialogContent className="sm:max-w-xs max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{pwMode === "deactivate" ? "Confirm Deactivation" : "Confirm Password"}</DialogTitle>
           </DialogHeader>
@@ -553,7 +553,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       </Dialog>
 
       <Dialog open={actionOpen} onOpenChange={setActionOpen}>
-        <DialogContent className="sm:max-w-xs">
+        <DialogContent className="sm:max-w-xs max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Option {selectedCol !== null ? selectedCol + 1 : ""}</DialogTitle>
           </DialogHeader>

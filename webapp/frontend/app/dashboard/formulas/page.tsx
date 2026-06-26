@@ -1,13 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
+import { Archive, Plus, Trash2, Pencil, Check, Upload, X } from "lucide-react";
 import { api, getUsername , apiErr } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -39,7 +47,6 @@ function CellVoltagesTable() {
   const qc = useQueryClient();
   const [editKey, setEditKey] = useState<string | null>(null);
   const [editRow, setEditRow] = useState<CellVoltage | null>(null);
-  const [adding, setAdding] = useState(false);
   const [newRow, setNewRow] = useState<CellVoltage>({ chemistry: "", nominal: 0, max_v: 0, end_v: 0 });
 
   const { data: rows = [], isLoading } = useQuery<CellVoltage[]>({
@@ -56,7 +63,7 @@ function CellVoltagesTable() {
 
   const create = useMutation({
     mutationFn: (row: CellVoltage) => api.post("/api/formulas/cell-voltages", row),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["cell-voltages"] }); setAdding(false); setNewRow({ chemistry: "", nominal: 0, max_v: 0, end_v: 0 }); toast.success("Added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["cell-voltages"] }); setNewRow({ chemistry: "", nominal: 0, max_v: 0, end_v: 0 }); toast.success("Added"); },
     onError: (e: any) => toast.error(apiErr(e, "Add failed")),
   });
 
@@ -69,11 +76,43 @@ function CellVoltagesTable() {
   const startEdit = (row: CellVoltage) => { setEditKey(row.chemistry); setEditRow({ ...row }); };
   const cancelEdit = () => { setEditKey(null); setEditRow(null); };
   const admin = isAdmin();
+  const canAdd = newRow.chemistry.trim().length > 0;
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
+      {admin && (
+        <div className="flex gap-2 items-center flex-wrap">
+          <Input
+            className="w-24 font-mono" placeholder="e.g. NMC"
+            value={newRow.chemistry}
+            onChange={(e) => setNewRow({ ...newRow, chemistry: e.target.value.toUpperCase() })}
+            onKeyDown={(e) => e.key === "Enter" && canAdd && create.mutate(newRow)}
+          />
+          <Input
+            type="number" step="0.01" className="w-28" placeholder="Nominal (V)"
+            value={newRow.nominal || ""}
+            onChange={(e) => setNewRow({ ...newRow, nominal: parseFloat(e.target.value) || 0 })}
+            onKeyDown={(e) => e.key === "Enter" && canAdd && create.mutate(newRow)}
+          />
+          <Input
+            type="number" step="0.01" className="w-28" placeholder="Max (V)"
+            value={newRow.max_v || ""}
+            onChange={(e) => setNewRow({ ...newRow, max_v: parseFloat(e.target.value) || 0 })}
+            onKeyDown={(e) => e.key === "Enter" && canAdd && create.mutate(newRow)}
+          />
+          <Input
+            type="number" step="0.01" className="w-28" placeholder="End (V)"
+            value={newRow.end_v || ""}
+            onChange={(e) => setNewRow({ ...newRow, end_v: parseFloat(e.target.value) || 0 })}
+            onKeyDown={(e) => e.key === "Enter" && canAdd && create.mutate(newRow)}
+          />
+          <Button size="sm" onClick={() => create.mutate(newRow)} disabled={!canAdd || create.isPending}>
+            <Plus className="h-4 w-4 mr-1" /> Add
+          </Button>
+        </div>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
@@ -90,25 +129,16 @@ function CellVoltagesTable() {
               <TableRow key={row.chemistry}>
                 <TableCell className="font-mono font-semibold">{row.chemistry}</TableCell>
                 <TableCell>
-                  <Input
-                    type="number" step="0.01" className="h-7 w-24"
-                    value={editRow.nominal}
-                    onChange={(e) => setEditRow({ ...editRow, nominal: parseFloat(e.target.value) || 0 })}
-                  />
+                  <Input type="number" step="0.01" className="h-7 w-24" value={editRow.nominal}
+                    onChange={(e) => setEditRow({ ...editRow, nominal: parseFloat(e.target.value) || 0 })} />
                 </TableCell>
                 <TableCell>
-                  <Input
-                    type="number" step="0.01" className="h-7 w-24"
-                    value={editRow.max_v}
-                    onChange={(e) => setEditRow({ ...editRow, max_v: parseFloat(e.target.value) || 0 })}
-                  />
+                  <Input type="number" step="0.01" className="h-7 w-24" value={editRow.max_v}
+                    onChange={(e) => setEditRow({ ...editRow, max_v: parseFloat(e.target.value) || 0 })} />
                 </TableCell>
                 <TableCell>
-                  <Input
-                    type="number" step="0.01" className="h-7 w-24"
-                    value={editRow.end_v}
-                    onChange={(e) => setEditRow({ ...editRow, end_v: parseFloat(e.target.value) || 0 })}
-                  />
+                  <Input type="number" step="0.01" className="h-7 w-24" value={editRow.end_v}
+                    onChange={(e) => setEditRow({ ...editRow, end_v: parseFloat(e.target.value) || 0 })} />
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-1">
@@ -134,44 +164,8 @@ function CellVoltagesTable() {
               </TableRow>
             )
           )}
-
-          {admin && adding && (
-            <TableRow>
-              <TableCell>
-                <Input
-                  className="h-7 w-24 font-mono" placeholder="e.g. NMC"
-                  value={newRow.chemistry}
-                  onChange={(e) => setNewRow({ ...newRow, chemistry: e.target.value.toUpperCase() })}
-                />
-              </TableCell>
-              <TableCell>
-                <Input type="number" step="0.01" className="h-7 w-24" value={newRow.nominal}
-                  onChange={(e) => setNewRow({ ...newRow, nominal: parseFloat(e.target.value) || 0 })} />
-              </TableCell>
-              <TableCell>
-                <Input type="number" step="0.01" className="h-7 w-24" value={newRow.max_v}
-                  onChange={(e) => setNewRow({ ...newRow, max_v: parseFloat(e.target.value) || 0 })} />
-              </TableCell>
-              <TableCell>
-                <Input type="number" step="0.01" className="h-7 w-24" value={newRow.end_v}
-                  onChange={(e) => setNewRow({ ...newRow, end_v: parseFloat(e.target.value) || 0 })} />
-              </TableCell>
-              <TableCell>
-                <div className="flex gap-1">
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => create.mutate(newRow)}><Check size={14} /></Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setAdding(false)}><X size={14} /></Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          )}
         </TableBody>
       </Table>
-
-      {admin && !adding && (
-        <Button variant="outline" size="sm" className="self-start" onClick={() => setAdding(true)}>
-          <Plus size={14} className="mr-1" /> Add Chemistry
-        </Button>
-      )}
     </div>
   );
 }
@@ -182,7 +176,6 @@ function DcCellsTable() {
   const qc = useQueryClient();
   const [editKey, setEditKey] = useState<number | null>(null);
   const [editRow, setEditRow] = useState<DcCell | null>(null);
-  const [adding, setAdding] = useState(false);
   const [newRow, setNewRow] = useState<DcCell>({ dc_voltage: 0, num_cells: 0 });
 
   const { data: rows = [], isLoading } = useQuery<DcCell[]>({
@@ -199,7 +192,7 @@ function DcCellsTable() {
 
   const create = useMutation({
     mutationFn: (row: DcCell) => api.post("/api/formulas/dc-cells", row),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["dc-cells"] }); setAdding(false); setNewRow({ dc_voltage: 0, num_cells: 0 }); toast.success("Added"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["dc-cells"] }); setNewRow({ dc_voltage: 0, num_cells: 0 }); toast.success("Added"); },
     onError: (e: any) => toast.error(apiErr(e, "Add failed")),
   });
 
@@ -212,11 +205,31 @@ function DcCellsTable() {
   const startEdit = (row: DcCell) => { setEditKey(row.dc_voltage); setEditRow({ ...row }); };
   const cancelEdit = () => { setEditKey(null); setEditRow(null); };
   const admin = isAdmin();
+  const canAdd = newRow.dc_voltage > 0 && newRow.num_cells > 0;
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
+      {admin && (
+        <div className="flex gap-2 items-center">
+          <Input
+            type="number" step="1" className="w-32 font-mono" placeholder="DC Voltage (V)"
+            value={newRow.dc_voltage || ""}
+            onChange={(e) => setNewRow({ ...newRow, dc_voltage: parseInt(e.target.value) || 0 })}
+            onKeyDown={(e) => e.key === "Enter" && canAdd && create.mutate(newRow)}
+          />
+          <Input
+            type="number" step="1" className="w-32" placeholder="Num Cells"
+            value={newRow.num_cells || ""}
+            onChange={(e) => setNewRow({ ...newRow, num_cells: parseInt(e.target.value) || 0 })}
+            onKeyDown={(e) => e.key === "Enter" && canAdd && create.mutate(newRow)}
+          />
+          <Button size="sm" onClick={() => create.mutate(newRow)} disabled={!canAdd || create.isPending}>
+            <Plus className="h-4 w-4 mr-1" /> Add
+          </Button>
+        </div>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
@@ -231,11 +244,8 @@ function DcCellsTable() {
               <TableRow key={row.dc_voltage}>
                 <TableCell className="font-mono font-semibold">{row.dc_voltage} V</TableCell>
                 <TableCell>
-                  <Input
-                    type="number" step="1" className="h-7 w-28"
-                    value={editRow.num_cells}
-                    onChange={(e) => setEditRow({ ...editRow, num_cells: parseInt(e.target.value) || 0 })}
-                  />
+                  <Input type="number" step="1" className="h-7 w-28" value={editRow.num_cells}
+                    onChange={(e) => setEditRow({ ...editRow, num_cells: parseInt(e.target.value) || 0 })} />
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-1">
@@ -259,154 +269,8 @@ function DcCellsTable() {
               </TableRow>
             )
           )}
-
-          {admin && adding && (
-            <TableRow>
-              <TableCell>
-                <Input
-                  type="number" step="1" className="h-7 w-28 font-mono" placeholder="e.g. 288"
-                  value={newRow.dc_voltage || ""}
-                  onChange={(e) => setNewRow({ ...newRow, dc_voltage: parseInt(e.target.value) || 0 })}
-                />
-              </TableCell>
-              <TableCell>
-                <Input
-                  type="number" step="1" className="h-7 w-28" placeholder="e.g. 90"
-                  value={newRow.num_cells || ""}
-                  onChange={(e) => setNewRow({ ...newRow, num_cells: parseInt(e.target.value) || 0 })}
-                />
-              </TableCell>
-              <TableCell>
-                <div className="flex gap-1">
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => create.mutate(newRow)}><Check size={14} /></Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setAdding(false)}><X size={14} /></Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          )}
         </TableBody>
       </Table>
-
-      {admin && !adding && (
-        <Button variant="outline" size="sm" className="self-start" onClick={() => setAdding(true)}>
-          <Plus size={14} className="mr-1" /> Add Voltage Level
-        </Button>
-      )}
-    </div>
-  );
-}
-
-// ── available variables hint ──────────────────────────────────────────────────
-
-const VARS_HINT = [
-  "actual_kw", "actual_kva", "ups_kva", "power_factor", "inverter_eff",
-  "nominal_dc_voltage", "backup_minutes", "ageing_percent",
-  "design_margin_percent", "dod_margin_percent", "derating_factor_percent",
-  "nearest_capacity", "num_cells", "cell_nominal", "cell_max", "cell_end",
-  "load", "max_charging_voltage", "end_cell_voltage", "energy_required",
-  "capacity_required", "cap_with_ageing", "cap_with_design_margin",
-  "cap_with_dod", "cap_with_derating",
-];
-
-// ── Sizing formulas editable table ────────────────────────────────────────────
-
-interface SizingFormula {
-  name: string;
-  expression: string;
-  description: string;
-  sort_order: number;
-}
-
-function SizingFormulasTable() {
-  const qc = useQueryClient();
-  const [editKey, setEditKey] = useState<string | null>(null);
-  const [editExpr, setEditExpr] = useState("");
-  const [showVars, setShowVars] = useState(false);
-  const admin = isAdmin();
-
-  const { data: rows = [], isLoading } = useQuery<SizingFormula[]>({
-    queryKey: ["sizing-formulas"],
-    queryFn: () => api.get("/api/formulas/sizing-formulas").then((r) => r.data),
-  });
-
-  const update = useMutation({
-    mutationFn: ({ name, expression }: { name: string; expression: string }) =>
-      api.put(`/api/formulas/sizing-formulas/${name}`, { expression }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sizing-formulas"] }); setEditKey(null); toast.success("Formula saved"); },
-    onError: (e: any) => toast.error(apiErr(e, "Save failed")),
-  });
-
-  const reset = useMutation({
-    mutationFn: (name: string) => api.post(`/api/formulas/sizing-formulas/${name}/reset`),
-    onSuccess: (_, name) => { qc.invalidateQueries({ queryKey: ["sizing-formulas"] }); if (editKey === name) setEditKey(null); toast.success("Reset to default"); },
-    onError: (e: any) => toast.error(apiErr(e, "Reset failed")),
-  });
-
-  const startEdit = (row: SizingFormula) => { setEditKey(row.name); setEditExpr(row.expression); };
-  const cancelEdit = () => setEditKey(null);
-
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
-
-  return (
-    <div className="flex flex-col gap-4">
-      {admin && (
-        <button
-          className="text-xs text-muted-foreground underline self-start"
-          onClick={() => setShowVars((v) => !v)}
-        >
-          {showVars ? "Hide" : "Show"} available variables
-        </button>
-      )}
-      {showVars && (
-        <div className="bg-muted rounded p-3 flex flex-wrap gap-1">
-          {VARS_HINT.map((v) => (
-            <code key={v} className="text-xs bg-background px-1.5 py-0.5 rounded border">{v}</code>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-2">
-        {rows.map((row) => (
-          <div key={row.name} className="border rounded-md p-3 flex flex-col gap-1">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">{row.description}</span>
-              {admin && editKey !== row.name && (
-                <div className="flex gap-1">
-                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => startEdit(row)}>
-                    <Pencil size={12} className="mr-1" /> Edit
-                  </Button>
-                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => reset.mutate(row.name)}>
-                    Reset
-                  </Button>
-                </div>
-              )}
-            </div>
-            {editKey === row.name ? (
-              <div className="flex flex-col gap-2 mt-1">
-                <textarea
-                  className="font-mono text-xs bg-muted border rounded p-2 resize-none w-full focus:outline-none focus:ring-1 focus:ring-primary"
-                  rows={2}
-                  value={editExpr}
-                  onChange={(e) => setEditExpr(e.target.value)}
-                  spellCheck={false}
-                />
-                <div className="flex gap-2">
-                  <Button size="sm" className="h-7" onClick={() => update.mutate({ name: row.name, expression: editExpr })}>
-                    <Check size={12} className="mr-1" /> Save
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7" onClick={cancelEdit}>
-                    <X size={12} className="mr-1" /> Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <code className="text-xs font-mono text-primary bg-muted px-2 py-1 rounded mt-0.5 block whitespace-pre-wrap break-all">
-                {row.expression}
-              </code>
-            )}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -469,9 +333,12 @@ function BackupTimesTable() {
                 <TableCell>
                   {r.is_preset && (
                     <button
-                      className="text-destructive hover:opacity-70"
-                      onClick={() => remove.mutate(r.name)}
-                      disabled={remove.isPending}
+                      className={r.has_products
+                        ? "text-muted-foreground/40 cursor-not-allowed"
+                        : "text-destructive hover:opacity-70"}
+                      title={r.has_products ? `Cannot delete: ${r.product_count} product(s) use this duration` : "Delete"}
+                      onClick={() => !r.has_products && remove.mutate(r.name)}
+                      disabled={r.has_products || remove.isPending}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -486,9 +353,470 @@ function BackupTimesTable() {
   );
 }
 
+// ── Datasheet / GAD file manager ─────────────────────────────────────────────
+
+function FileManagerPanel({ folderKey }: { folderKey: "datasheets" | "gads" }) {
+  const [view, setView] = useState<"active" | "archived">("active");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pwTarget, setPwTarget] = useState<string[]>([]);
+  const [pwValue, setPwValue] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [archiving, setArchiving] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+
+  const { data: activeData, isLoading: activeLoading, refetch: refetchActive } = useQuery<string[]>({
+    queryKey: ["datafiles", folderKey, "active"],
+    queryFn: () => api.get(`/api/datafiles/${folderKey}/files?view=active`).then((r) => r.data.files),
+  });
+
+  const { data: archivedData, isLoading: archivedLoading, refetch: refetchArchived } = useQuery<string[]>({
+    queryKey: ["datafiles", folderKey, "archived"],
+    queryFn: () => api.get(`/api/datafiles/${folderKey}/files?view=archived`).then((r) => r.data.files),
+  });
+
+  const activeCount = activeData?.length ?? 0;
+  const archivedCount = archivedData?.length ?? 0;
+  const files = view === "active" ? (activeData ?? []) : (archivedData ?? []);
+  const isLoading = view === "active" ? activeLoading : archivedLoading;
+  const refetch = () => { refetchActive(); refetchArchived(); };
+  const allChecked = files.length > 0 && files.every((f) => selected.has(f));
+  const toggleAll = () => setSelected(allChecked ? new Set() : new Set(files));
+  const toggleOne = (f: string) =>
+    setSelected((s) => { const n = new Set(s); n.has(f) ? n.delete(f) : n.add(f); return n; });
+
+  const switchView = (v: "active" | "archived") => {
+    setView(v);
+    setSelected(new Set());
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (!fileList.length) return;
+
+    const batches: File[][] = [];
+    for (let i = 0; i < fileList.length; i += 10) batches.push(fileList.slice(i, i + 10));
+
+    setUploading(true);
+    setUploadProgress({ done: 0, total: fileList.length });
+
+    const uploadBatch = async (batch: File[]) => {
+      const fd = new FormData();
+      batch.forEach((f) => fd.append("files", f));
+      await api.post(`/api/datafiles/${folderKey}/upload`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setUploadProgress((prev) => ({ ...prev, done: prev.done + batch.length }));
+    };
+
+    try {
+      await Promise.all(batches.map(uploadBatch));
+      toast.success(`Imported ${fileList.length} file(s)`);
+      refetch();
+    } catch {
+      toast.error("Some files failed to upload");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const openArchive = (filenames: string[]) => {
+    setPwTarget(filenames);
+    setPwValue("");
+    setPwError("");
+    setPwOpen(true);
+  };
+
+  const confirmArchive = async () => {
+    setPwError("");
+    try {
+      await api.post("/api/auth/verify-password", { password: pwValue });
+    } catch {
+      setPwError("Incorrect password");
+      return;
+    }
+    setArchiving(true);
+    try {
+      await api.post(`/api/datafiles/${folderKey}/archive`, { filenames: pwTarget });
+      toast.success(`Archived ${pwTarget.length} file(s)`);
+      setSelected((s) => { const n = new Set(s); pwTarget.forEach((f) => n.delete(f)); return n; });
+      setPwOpen(false);
+      refetch();
+    } catch (err: any) {
+      toast.error(apiErr(err, "Archive failed"));
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const handleRestore = async (filenames: string[]) => {
+    setRestoring(true);
+    try {
+      await api.post(`/api/datafiles/${folderKey}/restore`, { filenames });
+      toast.success(`Restored ${filenames.length} file(s)`);
+      setSelected((s) => { const n = new Set(s); filenames.forEach((f) => n.delete(f)); return n; });
+      refetch();
+    } catch (err: any) {
+      toast.error(apiErr(err, "Restore failed"));
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const label = folderKey === "datasheets" ? "Datasheet" : "GAD";
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Active / Archived sub-tabs */}
+      <div className="flex gap-1 border-b">
+        {(["active", "archived"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => switchView(v)}
+            className={
+              "px-3 py-1.5 text-sm font-medium border-b-2 -mb-px transition-colors " +
+              (view === v
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground")
+            }
+          >
+            {v === "active" ? `Active (${activeCount})` : `Archived (${archivedCount})`}
+          </button>
+        ))}
+      </div>
+
+      {/* Action bar — only shown in active view */}
+      {view === "active" && (
+        <div className="flex gap-2 items-center flex-wrap">
+          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleImport} />
+          <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            <Upload className="h-4 w-4 mr-1" />
+            {uploading
+              ? `Uploading ${uploadProgress.done} / ${uploadProgress.total}…`
+              : `Import ${label}s`}
+          </Button>
+          <Button
+            size="sm" variant="outline"
+            disabled={selected.size === 0 || archiving}
+            onClick={() => openArchive([...selected])}
+          >
+            <Archive className="h-4 w-4 mr-1" />
+            Mass Archive {selected.size > 0 && `(${selected.size})`}
+          </Button>
+        </div>
+      )}
+
+      {/* Mass restore bar — only shown in archived view */}
+      {view === "archived" && selected.size > 0 && (
+        <div className="flex gap-2 items-center">
+          <Button
+            size="sm" variant="outline"
+            disabled={restoring}
+            onClick={() => handleRestore([...selected])}
+          >
+            Mass Restore ({selected.size})
+          </Button>
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : files.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No files found.</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-10">
+                <input type="checkbox" checked={allChecked} onChange={toggleAll} className="cursor-pointer" />
+              </TableHead>
+              <TableHead>Filename</TableHead>
+              <TableHead className="w-28"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {files.map((f) => (
+              <TableRow key={f}>
+                <TableCell>
+                  <input type="checkbox" checked={selected.has(f)} onChange={() => toggleOne(f)} className="cursor-pointer" />
+                </TableCell>
+                <TableCell className="font-mono text-sm">{f}</TableCell>
+                <TableCell>
+                  {view === "active" ? (
+                    <Button
+                      size="sm" variant="ghost"
+                      className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                      onClick={() => openArchive([f])}
+                    >
+                      <Archive className="h-3 w-3 mr-1" /> Archive
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm" variant="ghost"
+                      className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                      disabled={restoring}
+                      onClick={() => handleRestore([f])}
+                    >
+                      Restore
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <Dialog open={pwOpen} onOpenChange={(o) => !o && setPwOpen(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Archive</DialogTitle>
+            <DialogDescription>
+              {pwTarget.length === 1
+                ? `Enter your password to archive "${pwTarget[0]}".`
+                : `Enter your password to archive ${pwTarget.length} file(s).`}
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            type="password" placeholder="Password" value={pwValue}
+            onChange={(e) => setPwValue(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && pwValue && confirmArchive()}
+            autoFocus
+          />
+          {pwError && <p className="text-sm text-destructive">{pwError}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPwOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmArchive} disabled={!pwValue || archiving}>
+              {archiving ? "Archiving…" : "Archive"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function DatasheetGadTab() {
+  const [subTab, setSubTab] = useState<"datasheets" | "gads">("datasheets");
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex gap-1 border-b">
+        {(["datasheets", "gads"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setSubTab(t)}
+            className={
+              "px-3 py-1.5 text-sm font-medium border-b-2 -mb-px transition-colors " +
+              (subTab === t
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground")
+            }
+          >
+            {t === "datasheets" ? "Datasheets" : "GAD"}
+          </button>
+        ))}
+      </div>
+      <FileManagerPanel key={subTab} folderKey={subTab} />
+    </div>
+  );
+}
+
+// ── Quote Rates ───────────────────────────────────────────────────────────────
+
+const RATE_LABELS: Record<string, string> = {
+  fire_suppression: "Fire Suppression System (per module)",
+  rmd_hvl: "Remote Monitoring Device — HVL (per module)",
+  rmd_efl: "Remote Monitoring Device — EFL (per module)",
+  subscription: "Subscription Charges (per year)",
+};
+
+function QuoteRatesTable() {
+  const qc = useQueryClient();
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [editVal, setEditVal] = useState("");
+
+  const { data: rates = [], isLoading } = useQuery<{ key: string; value: number; description: string }[]>({
+    queryKey: ["quote-rates"],
+    queryFn: () => api.get("/api/formulas/quote-rates").then((r) => r.data),
+  });
+
+  const save = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: number }) =>
+      api.put("/api/formulas/quote-rates", { key, value }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["quote-rates"] }); setEditKey(null); toast.success("Saved"); },
+    onError: (e: any) => toast.error(apiErr(e, "Save failed")),
+  });
+
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Item</TableHead>
+          <TableHead className="text-right">Rate (₹)</TableHead>
+          <TableHead className="w-20" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rates.map((r) => (
+          <TableRow key={r.key}>
+            <TableCell className="text-sm">{RATE_LABELS[r.key] ?? r.description}</TableCell>
+            <TableCell className="text-right">
+              {editKey === r.key ? (
+                <Input type="number" className="w-32 ml-auto text-right" value={editVal}
+                  onChange={(e) => setEditVal(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") save.mutate({ key: r.key, value: parseFloat(editVal) || 0 }); if (e.key === "Escape") setEditKey(null); }}
+                  autoFocus />
+              ) : (
+                <span className="font-mono">₹{r.value.toLocaleString()}</span>
+              )}
+            </TableCell>
+            <TableCell>
+              <div className="flex gap-1 justify-end">
+                {editKey === r.key ? (
+                  <>
+                    <button onClick={() => save.mutate({ key: r.key, value: parseFloat(editVal) || 0 })} className="p-1 hover:text-primary"><Check className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => setEditKey(null)} className="p-1 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
+                  </>
+                ) : (
+                  <button onClick={() => { setEditKey(r.key); setEditVal(String(r.value)); }} className="p-1 hover:text-primary"><Pencil className="h-3.5 w-3.5" /></button>
+                )}
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function ModularRackRatesTable() {
+  const qc = useQueryClient();
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [editNewKey, setEditNewKey] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [newKey, setNewKey] = useState("");
+  const [newPrice, setNewPrice] = useState("");
+
+  const { data: racks = [], isLoading } = useQuery<{ key: string; price: number }[]>({
+    queryKey: ["modular-rack-rates"],
+    queryFn: () => api.get("/api/formulas/modular-rack-rates").then((r) => r.data),
+  });
+
+  const add = useMutation({
+    mutationFn: () => api.post("/api/formulas/modular-rack-rates", { old_key: "", new_key: newKey.trim(), price: parseFloat(newPrice) || 0 }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["modular-rack-rates"] }); setNewKey(""); setNewPrice(""); toast.success("Added"); },
+    onError: (e: any) => toast.error(apiErr(e, "Add failed")),
+  });
+
+  const remove = useMutation({
+    mutationFn: (key: string) => api.delete(`/api/formulas/modular-rack-rates?key=${encodeURIComponent(key)}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["modular-rack-rates"] }); toast.success("Deleted"); },
+    onError: (e: any) => toast.error(apiErr(e, "Delete failed")),
+  });
+
+  const save = useMutation({
+    mutationFn: ({ old_key, new_key, price }: { old_key: string; new_key: string; price: number }) =>
+      api.put("/api/formulas/modular-rack-rates", { old_key, new_key, price }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["modular-rack-rates"] }); setEditKey(null); toast.success("Saved"); },
+    onError: (e: any) => toast.error(apiErr(e, "Save failed")),
+  });
+
+  const startEdit = (r: { key: string; price: number }) => {
+    setEditKey(r.key);
+    setEditNewKey(r.key);
+    setEditPrice(String(r.price));
+  };
+
+  const doSave = (oldKey: string) =>
+    save.mutate({ old_key: oldKey, new_key: editNewKey.trim() || oldKey, price: parseFloat(editPrice) || 0 });
+
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex gap-2 items-center flex-wrap">
+        <Input
+          className="w-56 font-mono text-sm" placeholder="e.g. W=600*D=1000*H=992"
+          value={newKey} onChange={(e) => setNewKey(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && newKey.trim() && newPrice && add.mutate()}
+        />
+        <Input
+          type="number" className="w-32" placeholder="Price (₹)"
+          value={newPrice} onChange={(e) => setNewPrice(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && newKey.trim() && newPrice && add.mutate()}
+        />
+        <Button size="sm" onClick={() => add.mutate()} disabled={!newKey.trim() || !newPrice || add.isPending}>
+          <Plus className="h-4 w-4 mr-1" /> Add
+        </Button>
+      </div>
+      <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Dimensions / Key</TableHead>
+          <TableHead>Quote Row Description Preview</TableHead>
+          <TableHead className="text-right">Price (₹)</TableHead>
+          <TableHead className="w-24" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {racks.map((r) => {
+          const isEditing = editKey === r.key;
+          const previewKey = isEditing ? (editNewKey.trim() || r.key) : r.key;
+          const dims = r.key.replace(/[WDH]=/g, "").replace(/\*/g, " × ");
+          return (
+            <TableRow key={r.key}>
+              <TableCell className="font-mono text-sm">
+                {isEditing ? (
+                  <Input className="w-56 font-mono text-sm" value={editNewKey}
+                    onChange={(e) => setEditNewKey(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") doSave(r.key); if (e.key === "Escape") setEditKey(null); }}
+                    autoFocus />
+                ) : dims}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground font-mono">{`Modular Battery Rack (${previewKey})`}</TableCell>
+              <TableCell className="text-right">
+                {isEditing ? (
+                  <Input type="number" className="w-36 ml-auto text-right" value={editPrice}
+                    onChange={(e) => setEditPrice(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") doSave(r.key); if (e.key === "Escape") setEditKey(null); }} />
+                ) : (
+                  <span className="font-mono">₹{r.price.toLocaleString()}</span>
+                )}
+              </TableCell>
+              <TableCell>
+                <div className="flex gap-1 justify-end">
+                  {isEditing ? (
+                    <>
+                      <button onClick={() => doSave(r.key)} className="p-1 hover:text-primary"><Check className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => setEditKey(null)} className="p-1 hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => startEdit(r)} className="p-1 hover:text-primary"><Pencil className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => remove.mutate(r.key)} disabled={remove.isPending}
+                        className="p-1 text-destructive hover:opacity-70 disabled:opacity-30"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </>
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type Tab = "cell-voltages" | "dc-cells" | "formulas" | "backup-times";
+type Tab = "cell-voltages" | "dc-cells" | "backup-times" | "datasheets-gad" | "quote-rates";
 
 export default function FormulasPage() {
   const [tab, setTab] = useState<Tab>("cell-voltages");
@@ -498,13 +826,13 @@ export default function FormulasPage() {
       <div>
         <h1 className="text-2xl font-bold">Masters</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Edit cell chemistry voltages, DC→Cell mappings, and sizing formula expressions.
+          Edit cell chemistry voltages, DC→Cell mappings, and backup time presets.
         </p>
       </div>
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b pb-0">
-        {(["cell-voltages", "dc-cells", "formulas", "backup-times"] as Tab[]).map((t) => (
+        {(["cell-voltages", "dc-cells", "backup-times", "datasheets-gad", "quote-rates"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -515,7 +843,15 @@ export default function FormulasPage() {
                 : "border-transparent text-muted-foreground hover:text-foreground")
             }
           >
-            {t === "cell-voltages" ? "Cell Voltages" : t === "dc-cells" ? "DC → Cells" : t === "formulas" ? "Sizing Formulas" : "Backup Time Presets"}
+            {t === "cell-voltages"
+              ? "Cell Voltages"
+              : t === "dc-cells"
+              ? "DC → Cells"
+              : t === "backup-times"
+              ? "Backup Time Presets"
+              : t === "datasheets-gad"
+              ? "Datasheets & GAD"
+              : "Quote Rates"}
           </button>
         ))}
       </div>
@@ -542,17 +878,6 @@ export default function FormulasPage() {
         </Card>
       )}
 
-      {tab === "formulas" && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Sizing Formulas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SizingFormulasTable />
-          </CardContent>
-        </Card>
-      )}
-
       {tab === "backup-times" && (
         <Card>
           <CardHeader>
@@ -562,6 +887,38 @@ export default function FormulasPage() {
             <BackupTimesTable />
           </CardContent>
         </Card>
+      )}
+
+      {tab === "datasheets-gad" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Datasheets & GAD Files</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DatasheetGadTab />
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === "quote-rates" && (
+        <div className="flex flex-col gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Custom Cost Preset Rates</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <QuoteRatesTable />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Modular Battery Rack Prices</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ModularRackRatesTable />
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );

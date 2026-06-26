@@ -186,7 +186,7 @@ export default function AdminPage() {
 
       {/* ── Create User Dialog ─────────────────────────────────────────────── */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Add New User</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-3 py-2">
             <div className="flex flex-col gap-1.5">
@@ -247,7 +247,7 @@ export default function AdminPage() {
 
       {/* ── Edit User Dialog ───────────────────────────────────────────────── */}
       <Dialog open={!!editUser} onOpenChange={(v) => !v && setEditUser(null)}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit — <span className="font-mono">{editUser?.username}</span></DialogTitle>
           </DialogHeader>
@@ -298,7 +298,7 @@ export default function AdminPage() {
 
       {/* ── Delete Confirm Dialog ──────────────────────────────────────────── */}
       <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Delete User?</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground py-1">
             This will permanently remove{" "}

@@ -7,7 +7,7 @@ import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, BarChart2, DollarSign, FileText, BookOpen,
-  Layout, LogOut, FlaskConical, Sun, Moon, ClipboardCheck, ShieldCheck, Wand2, ClipboardList, Clock,
+  Layout, LogOut, FlaskConical, Sun, Moon, ClipboardCheck, ShieldCheck, Wand2, ClipboardList, Clock, PackageCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -15,19 +15,40 @@ import { isAuthenticated, getUsername, api } from "@/lib/api";
 import { logout } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-const NAV = [
-  { label: "Home",      href: "/dashboard",           icon: Home,          expertOnly: false },
-  { label: "Sizing",    href: "/dashboard/sizing",    icon: BarChart2,     expertOnly: false },
-  { label: "Costing",   href: "/dashboard/costing",   icon: DollarSign,    expertOnly: false },
-  { label: "Quote",     href: "/dashboard/quote",     icon: FileText,      expertOnly: false },
-  { label: "Datasheet", href: "/dashboard/datasheet", icon: BookOpen,      expertOnly: false },
-  { label: "GAD",       href: "/dashboard/gad",       icon: Layout,        expertOnly: false },
-  { label: "Masters",   href: "/dashboard/formulas",  icon: FlaskConical,  expertOnly: true  },
-{ label: "Approvals", href: "/dashboard/approvals", icon: ClipboardCheck, expertOnly: false },
-  { label: "Inquiry",   href: "/dashboard/inquiry",   icon: ClipboardList,  expertOnly: false },
-  { label: "Pending",   href: "/dashboard/pending",   icon: Clock,          expertOnly: false },
-  { label: "Wizard",    href: "/dashboard/wizard",    icon: Wand2,          expertOnly: false },
-  { label: "Admin",     href: "/dashboard/admin",     icon: ShieldCheck,   expertOnly: true  },
+const NAV_SECTIONS = [
+  {
+    section: null,
+    items: [
+      { label: "Home", href: "/dashboard", icon: Home, expertOnly: false },
+    ],
+  },
+  {
+    section: "Document Creation",
+    items: [
+      { label: "Sizing",    href: "/dashboard/sizing",    icon: BarChart2,  expertOnly: false },
+      { label: "Costing",   href: "/dashboard/costing",   icon: DollarSign, expertOnly: false },
+      { label: "Quote",     href: "/dashboard/quote",     icon: FileText,   expertOnly: false },
+      { label: "Datasheet", href: "/dashboard/datasheet", icon: BookOpen,   expertOnly: false },
+      { label: "GAD",       href: "/dashboard/gad",       icon: Layout,     expertOnly: false },
+      { label: "Wizard",    href: "/dashboard/wizard",    icon: Wand2,      expertOnly: false },
+    ],
+  },
+  {
+    section: "Tracking",
+    items: [
+      { label: "Approvals",   href: "/dashboard/approvals",   icon: ClipboardCheck, expertOnly: false },
+      { label: "Pending",     href: "/dashboard/pending",     icon: Clock,          expertOnly: false },
+      { label: "Inquiry",     href: "/dashboard/inquiry",     icon: ClipboardList,  expertOnly: false },
+      { label: "PO Tracking", href: "/dashboard/po-tracking", icon: PackageCheck,   expertOnly: false },
+    ],
+  },
+  {
+    section: "Admin",
+    items: [
+      { label: "Masters", href: "/dashboard/formulas", icon: FlaskConical, expertOnly: true },
+      { label: "Admin",   href: "/dashboard/admin",   icon: ShieldCheck,  expertOnly: true },
+    ],
+  },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -45,6 +66,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
     setUsername(getUsername());
   }, [router]);
+
+  useEffect(() => {
+    const handler = () => {
+      if (document.activeElement instanceof HTMLInputElement &&
+          document.activeElement.type === "number")
+        document.activeElement.blur();
+    };
+    document.addEventListener("wheel", handler, { passive: true });
+    return () => document.removeEventListener("wheel", handler);
+  }, []);
 
   const { data: me } = useQuery({
     queryKey: ["me"],
@@ -72,25 +103,38 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <p className="text-base font-semibold truncate">{username}</p>
         </div>
         <Separator />
-        <nav className="flex flex-col gap-1 p-2 flex-1">
-          {NAV.filter(({ expertOnly }) => !expertOnly || me?.role === "e").map(({ label, href, icon: Icon }) => {
-            const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
-            const badge = label === "Approvals" && approvalBadge > 0 ? approvalBadge : 0;
+        <nav className="flex flex-col gap-0.5 p-2 flex-1 overflow-y-auto">
+          {NAV_SECTIONS.map(({ section, items }) => {
+            const visible = items.filter(({ expertOnly }) => !expertOnly || me?.role === "e");
+            if (!visible.length) return null;
             return (
-              <Link key={href} href={href}>
-                <Button
-                  variant={active ? "default" : "ghost"}
-                  className={cn("w-full justify-start gap-2 text-sm", active && "font-semibold")}
-                >
-                  <Icon size={15} />
-                  <span className="flex-1 text-left">{label}</span>
-                  {badge > 0 && (
-                    <span className="text-[10px] bg-yellow-500 text-white rounded-full px-1.5 py-0.5 leading-none font-bold">
-                      {badge}
-                    </span>
-                  )}
-                </Button>
-              </Link>
+              <div key={section ?? "__home"} className="mb-1">
+                {section && (
+                  <p className="px-2 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {section}
+                  </p>
+                )}
+                {visible.map(({ label, href, icon: Icon }) => {
+                  const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+                  const badge = label === "Approvals" && approvalBadge > 0 ? approvalBadge : 0;
+                  return (
+                    <Link key={href} href={href}>
+                      <Button
+                        variant={active ? "default" : "ghost"}
+                        className={cn("w-full justify-start gap-2 text-sm", active && "font-semibold")}
+                      >
+                        <Icon size={15} />
+                        <span className="flex-1 text-left">{label}</span>
+                        {badge > 0 && (
+                          <span className="text-[10px] bg-yellow-500 text-white rounded-full px-1.5 py-0.5 leading-none font-bold">
+                            {badge}
+                          </span>
+                        )}
+                      </Button>
+                    </Link>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>

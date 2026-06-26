@@ -8,9 +8,12 @@ import { api , apiErr } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Copy, Download, X } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { PendingLinkDialog } from "@/components/pending-link-dialog";
+import SubmitApprovalDialog, { type ApprovalItem } from "@/components/SubmitApprovalDialog";
 
 interface Quote {
   code: string;
@@ -37,6 +40,14 @@ export default function QuotePage() {
   const [dlOpen, setDlOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
 
+  // export flow
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportTargetCode, setExportTargetCode] = useState("");
+  const [exportFmt, setExportFmt] = useState<"word" | "pdf">("word");
+  const [pendingLinkOpen, setPendingLinkOpen] = useState(false);
+  const [pendingExportData, setPendingExportData] = useState<Record<string, string>>({});
+  const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
+
   // New quote form state
   const [nCode, setNCode] = useState("");
   const [nDate, setNDate] = useState(() => new Date().toLocaleDateString("en-GB"));
@@ -44,6 +55,10 @@ export default function QuotePage() {
   const [nProvider, setNProvider] = useState("");
   const [nSalesPerson, setNSalesPerson] = useState("");
   const [nFormat, setNFormat] = useState(FORMATS[0]);
+  const [nDollarRate, setNDollarRate] = useState("");
+  const [nWarranty, setNWarranty] = useState("5");
+
+  const EXTENDED_FORMATS = new Set(["Extended Warranty High Voltage", "Extended Warranty Low Voltage"]);
 
   const { data: quotes = [], isLoading } = useQuery<Quote[]>({
     queryKey: ["quotes"],
@@ -71,6 +86,8 @@ export default function QuotePage() {
       solution_provider: nProvider,
       sales_person: nSalesPerson,
       format_name: nFormat,
+      dollar_rate: nDollarRate,
+      warranty_years: parseInt(nWarranty) || 5,
     }),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ["quotes"] });
@@ -88,6 +105,62 @@ export default function QuotePage() {
     },
     onError: (e: any) => toast.error(apiErr(e, "Delete failed")),
   });
+
+  const dupMut = useMutation({
+    mutationFn: (code: string) => api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/duplicate`),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["quotes"] });
+      toast.success(`Duplicated as ${res.data.code}`);
+    },
+    onError: (e: any) => toast.error(apiErr(e, "Duplicate failed")),
+  });
+
+  const openExport = (code: string) => {
+    setExportTargetCode(code);
+    setExportDialogOpen(true);
+  };
+
+  const handleFormatSelect = (fmt: "word" | "pdf") => {
+    setExportFmt(fmt);
+    setExportDialogOpen(false);
+    setPendingExportData({ export_type: `quote_${fmt}`, quote_code: exportTargetCode });
+    setPendingLinkOpen(true);
+  };
+
+  const doExport = (code: string, fmt: "word" | "pdf") => {
+    const ext = fmt === "word" ? "docx" : "pdf";
+    api.get(`/api/quotation/quotes/${encodeURIComponent(code)}/export/${fmt}`, { responseType: "blob" })
+      .then((res) => {
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Quote_${code}.${ext}`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/save-to-firebase`).catch(() => {});
+      }).catch((e) => toast.error(apiErr(e, "Export failed")));
+  };
+
+  const handleSubmitForApproval = async (code: string) => {
+    setExportDialogOpen(false);
+    try {
+      const res = await api.get(`/api/quotation/quotes/${encodeURIComponent(code)}/items`);
+      const items = res.data;
+      const first = items?.[0];
+      if (!first) { toast.error("No items to submit"); return; }
+      setApprovalItem({
+        type: "quotation",
+        name: `Quote ${code}`,
+        data: {
+          meta: { code, date: first.date, customer_name: first.customer_name,
+                  solution_provider: first.solution_provider, format_name: first.format ?? "High voltage" },
+          items,
+        },
+      });
+    } catch (e: any) {
+      toast.error(apiErr(e, "Failed to load quote items"));
+    }
+  };
 
   const downloadMut = useMutation({
     mutationFn: (code: string) => api.post(`/api/quotation/firebase-quotes/${encodeURIComponent(code)}/download`),
@@ -107,6 +180,8 @@ export default function QuotePage() {
     setNProvider("");
     setNSalesPerson("");
     setNFormat(FORMATS[0]);
+    setNDollarRate("");
+    setNWarranty("5");
     setNewOpen(true);
   };
 
@@ -123,11 +198,12 @@ export default function QuotePage() {
               <th className="text-center py-2 px-4">Customer Name</th>
               <th className="text-center py-2 px-4">Solution Provider</th>
               <th className="text-center py-2 px-4">Sales Person</th>
+              <th className="text-center py-2 px-2">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && <tr><td colSpan={5} className="text-center py-8 text-muted-foreground">Loading…</td></tr>}
-            {!isLoading && quotes.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-muted-foreground">No quotes yet</td></tr>}
+            {isLoading && <tr><td colSpan={6} className="text-center py-8 text-muted-foreground">Loading…</td></tr>}
+            {!isLoading && quotes.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-muted-foreground">No quotes yet</td></tr>}
             {quotes.map((q) => (
               <tr
                 key={q.code}
@@ -140,6 +216,24 @@ export default function QuotePage() {
                 <td className="text-center py-2 px-4">{q.customer_name}</td>
                 <td className="text-center py-2 px-4">{q.solution_provider}</td>
                 <td className="text-center py-2 px-4">{q.sales_person}</td>
+                <td className="text-center py-1 px-2" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex gap-1 justify-center">
+                    <Button size="icon" variant="outline" title="Duplicate"
+                      disabled={dupMut.isPending}
+                      onClick={() => dupMut.mutate(q.code)}>
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="outline" title="Export"
+                      onClick={() => openExport(q.code)}>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="destructive" title="Delete"
+                      disabled={deleteMut.isPending}
+                      onClick={() => deleteMut.mutate(q.code)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -149,20 +243,16 @@ export default function QuotePage() {
       <div className="flex gap-3">
         <Button onClick={openNew}>New Quote</Button>
         <Button variant="outline" onClick={() => setDlOpen(true)}>Download Quote</Button>
-        <Button variant="destructive" disabled={!selected || deleteMut.isPending}
-          onClick={() => selected && deleteMut.mutate(selected)}>
-          Delete Quote
-        </Button>
       </div>
 
       {/* New Quote Dialog */}
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>New Quote</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-3 py-2">
             <Row label="Format">
               <select className="h-9 rounded-md border px-3 text-sm bg-background w-full"
-                value={nFormat} onChange={(e) => setNFormat(e.target.value)}>
+                value={nFormat} onChange={(e) => { setNFormat(e.target.value); setNWarranty(EXTENDED_FORMATS.has(e.target.value) ? "" : "5"); }}>
                 {FORMATS.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
             </Row>
@@ -181,6 +271,12 @@ export default function QuotePage() {
             <Row label="Sales Person">
               <Input value={nSalesPerson} onChange={(e) => setNSalesPerson(e.target.value)} />
             </Row>
+            <Row label="Dollar Rate">
+              <Input type="number" min="0" step="0.01" value={nDollarRate} onChange={(e) => setNDollarRate(e.target.value)} placeholder="e.g. 84.5" />
+            </Row>
+            <Row label="Warranty (yrs)">
+              <Input type="number" min="1" value={nWarranty} onChange={(e) => setNWarranty(e.target.value)} placeholder={EXTENDED_FORMATS.has(nFormat) ? "e.g. 10" : "5"} />
+            </Row>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewOpen(false)}>Cancel</Button>
@@ -193,7 +289,7 @@ export default function QuotePage() {
 
       {/* Download from Firebase Dialog */}
       <Dialog open={dlOpen} onOpenChange={setDlOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Download Quote from Firebase</DialogTitle></DialogHeader>
           <div className="overflow-auto max-h-96 border rounded-md">
             <table className="table-grid w-full text-sm">
@@ -227,6 +323,39 @@ export default function QuotePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Export format dialog */}
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader><DialogTitle>Export Quote {exportTargetCode}</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <Button onClick={() => handleFormatSelect("word")}>Word (.docx)</Button>
+            <Button variant="outline" onClick={() => handleFormatSelect("pdf")}>PDF (.pdf)</Button>
+            <div className="border-t pt-3">
+              <Button variant="outline" className="w-full" onClick={() => handleSubmitForApproval(exportTargetCode)}>
+                Submit for Approval
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setExportDialogOpen(false)}>Cancel</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pending link dialog */}
+      <PendingLinkDialog
+        open={pendingLinkOpen}
+        exportLabel={`Quote ${exportTargetCode} (${exportFmt === "word" ? "Word" : "PDF"})`}
+        exportData={pendingExportData}
+        onClose={() => setPendingLinkOpen(false)}
+        onDone={() => doExport(exportTargetCode, exportFmt)}
+      />
+
+      {/* Approval dialog */}
+      {approvalItem && (
+        <SubmitApprovalDialog open={!!approvalItem} item={approvalItem} onClose={() => setApprovalItem(null)} />
+      )}
     </div>
   );
 }

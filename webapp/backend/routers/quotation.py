@@ -64,6 +64,8 @@ class QuoteCreate(BaseModel):
     solution_provider: str
     format_name: str
     sales_person: str = ""
+    dollar_rate: str = ""
+    warranty_years: int = 5
 
 class QuoteItem(BaseModel):
     code: str
@@ -146,9 +148,16 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
     meta = next((q for q in quotes if q[0] == quote_code), None)
     if not meta:
         raise ValueError("Quote not found")
-    code, date, customer, provider, fmt_fname, *_ = meta
+    code, date, customer, provider, fmt_fname, *_rest = meta
     template_path = str(TEMPLATES / fmt_fname)
     items = get_all_quote_products(quote_code, db_path)
+
+    dollar_rate = str(_rest[1]) if len(_rest) > 1 and _rest[1] else ""
+    warranty_raw = str(_rest[2]) if len(_rest) > 2 and _rest[2] else "5"
+    try:
+        extended_warranty = str(int(warranty_raw) - 5)
+    except Exception:
+        extended_warranty = ""
 
     doc = docx.Document(template_path)
     replacements = {
@@ -156,19 +165,33 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
         "{{DATE}}": str(date),
         "{{SOLUTION_PROVIDER}}": str(provider),
         "{{CUSTOMER_NAME}}": str(customer),
+        "{DOLLAR_RATE}": dollar_rate,
+        "{EXTENDED_WARRANTY}": extended_warranty,
     }
-    for para in doc.paragraphs:
+
+    def _replace_para(para):
         for key, val in replacements.items():
             if key in para.text:
                 para.text = para.text.replace(key, val)
+
+    for para in doc.paragraphs:
+        _replace_para(para)
         for run in para.runs:
             run.font.name = "Calibri"
             run._element.rPr.rFonts.set(qn("w:eastAsia"), "Calibri")
             run.font.size = Pt(11)
 
+    for tbl in doc.tables:
+        for tbl_row in tbl.rows:
+            for cell in tbl_row.cells:
+                for para in cell.paragraphs:
+                    _replace_para(para)
+
     if not doc.tables:
         raise ValueError("No table in template")
     table = doc.tables[0]
+
+    is_extended = "Extended_Warranty" in fmt_fname
 
     sol_no = 0
     for row_idx, item in enumerate(items, start=1):
@@ -203,6 +226,8 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
                 f"Approximate Backup Time: {bt_floor}Mins At {ageing_lbl}\n"
                 f"With Cabinet and inbuilt BMS"
             )
+            if is_extended:
+                solution_text += "\nWith extended warranty as per warranty clause Annexure C"
 
         cells = trow.cells
         def _set(cell, text):
@@ -256,7 +281,9 @@ def list_quotes(user=Depends(get_current_user), scope: str = Query("regular")):
     rows = get_all_quotes(tdb)
     return [{"code": r[0], "date": r[1], "customer_name": r[2],
              "solution_provider": r[3], "format": r[4],
-             "sales_person": r[5] if len(r) > 5 else ""} for r in rows]
+             "sales_person": r[5] if len(r) > 5 else "",
+             "dollar_rate": r[6] if len(r) > 6 else "",
+             "warranty_years": r[7] if len(r) > 7 else "5"} for r in rows]
 
 
 @router.post("/quotes", status_code=201)
@@ -264,10 +291,47 @@ def create_quote(body: QuoteCreate, user=Depends(get_current_user), scope: str =
     tdb = _tdb(user["username"], scope)
     fname = TEMPLATE_MAP.get(body.format_name, "Quote_format_High_Vtg.docx")
     try:
-        add_new_quote(body.code, body.date, body.customer_name, body.solution_provider, fname, tdb, body.sales_person)
+        add_new_quote(body.code, body.date, body.customer_name, body.solution_provider, fname, tdb, body.sales_person, body.dollar_rate, str(body.warranty_years))
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"code": body.code}
+
+
+@router.post("/quotes/{code}/duplicate", status_code=201)
+def duplicate_quote(code: str, user=Depends(get_current_user), scope: str = Query("regular")):
+    tdb = _tdb(user["username"], scope)
+    quotes = get_all_quotes(tdb)
+    meta = next((q for q in quotes if q[0] == code), None)
+    if not meta:
+        raise HTTPException(404, "Quote not found")
+
+    existing_codes = {q[0] for q in quotes}
+    new_code = f"{code}_copy"
+    n = 1
+    while new_code in existing_codes:
+        new_code = f"{code}_copy{n}"; n += 1
+
+    _, date, customer, provider, fmt_fname, *_rest = meta
+    sales = _rest[0] if _rest else ""
+    dollar_rate = str(_rest[1]) if len(_rest) > 1 and _rest[1] else ""
+    warranty_years = str(_rest[2]) if len(_rest) > 2 and _rest[2] else "5"
+
+    add_new_quote(new_code, date, customer, provider, fmt_fname, tdb, sales, dollar_rate, warranty_years)
+    for item in get_all_quote_products(code, tdb):
+        d = _row_to_dict(item)
+        add_product_quote(
+            new_code, new_code, d.get("format", fmt_fname), d.get("date", date),
+            d.get("solution_provider", provider), d.get("customer_name", customer),
+            d.get("sr_no"), d.get("sol_no"), d.get("ups_rating"), d.get("backup_requirement"),
+            d.get("calc_load"), d.get("celltype"), d.get("centre_tapping"),
+            d.get("batterypartcode"), d.get("backup_time"), d.get("quantity"),
+            d.get("quote_price"), d.get("modular_rack", "-"),
+            calc_load_unit=d.get("calc_load_unit", "kW"),
+            item_type=d.get("item_type", "system"),
+            ageing_type=d.get("ageing_type", "BOL"),
+            db_path=tdb,
+        )
+    return {"code": new_code}
 
 
 class PatchMetaReq(BaseModel):
@@ -277,6 +341,8 @@ class PatchMetaReq(BaseModel):
     date: str = ""
     format_name: str = ""
     new_code: str = ""
+    dollar_rate: str = ""
+    warranty_years: str = ""
 
 @router.patch("/quotes/{code}/meta", status_code=200)
 def patch_meta(code: str, body: PatchMetaReq, user=Depends(get_current_user), scope: str = Query("regular")):
@@ -293,13 +359,15 @@ def patch_meta(code: str, body: PatchMetaReq, user=Depends(get_current_user), sc
     provider = body.solution_provider or meta[3]
     sales = body.sales_person if body.sales_person is not None else (meta[5] if len(meta) > 5 else "")
     date = body.date or meta[1]
+    dollar_rate = body.dollar_rate if body.dollar_rate is not None else (meta[6] if len(meta) > 6 else "")
+    warranty_years = body.warranty_years if body.warranty_years else (meta[7] if len(meta) > 7 else "5")
 
     conn = get_db_connection(tdb)
     try:
         c = conn.cursor()
         c.execute(
-            "UPDATE active_quotes SET customer_name=?, solution_provider=?, sales_person=?, date=?, format=? WHERE code=?",
-            (customer, provider, sales, date, fname, code)
+            "UPDATE active_quotes SET customer_name=?, solution_provider=?, sales_person=?, date=?, format=?, dollar_rate=?, warranty_years=? WHERE code=?",
+            (customer, provider, sales, date, fname, dollar_rate, str(warranty_years), code)
         )
         if new_code != code:
             existing = c.execute("SELECT code FROM active_quotes WHERE code=?", (new_code,)).fetchone()
@@ -513,9 +581,8 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
                     "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
                     "custom_cost_desc": "", "custom_cost_price": "",
                     "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO",
-                    "battery_compliance": "NO", "warranty": "5 year",
-                    "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
-                    "submission_date": "", "submitted_to": "",
+                    "battery_compliance": "NO", "warranty": "5",
+                    "remarks": "", "submission_date": "", "submitted_to": "",
                     "quote_code": code, "sol_no": str(sol_no),
                 }, db_path=user_inq_db)
         except Exception:
@@ -558,6 +625,12 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
     if not meta:
         raise HTTPException(404, "Quote not found")
     q_code, q_date, q_customer, q_provider, q_fmt, *_rest = meta; q_sales = _rest[0] if _rest else ""
+    q_dollar_rate = str(_rest[1]) if len(_rest) > 1 and _rest[1] else ""
+    q_warranty_years = int(_rest[2]) if len(_rest) > 2 and _rest[2] else 5
+
+    _is_extended = "Extended_Warranty" in (q_fmt or "")
+    _base_partcode = body.partcode or ""
+    _part_code = f"{_base_partcode}-{q_warranty_years}W" if _is_extended else _base_partcode
 
     sr_no = get_highest_sr_no(code, tdb) + 1
     all_items = get_all_quote_products(code, tdb)
@@ -595,7 +668,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
         code, q_code, q_fmt, q_date, q_provider, q_customer,
         sr_no, sol_no, ups_rating_val,
         backup_req, calc_load_val,
-        str(body.cell_type), str(body.centre_tap), str(body.partcode),
+        str(body.cell_type), str(body.centre_tap), str(_part_code),
         backup_time, body.quantity, quote_price, "-",
         calc_load_unit=calc_load_unit, item_type="system", ageing_type=ageing_type, db_path=tdb,
     )
@@ -630,15 +703,18 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                     "capacity_ah": str(srow[27] or ""),
                     "centre_tap": str(body.centre_tap or ""), "cell_type": str(body.cell_type or ""),
                     "ageing_type": _srow_ageing, "backup_time_min": _srow_bt,
-                    "part_code": str(body.partcode or ""),
+                    "part_code": str(_part_code),
                     "qty_system": str(body.quantity), "rate_system": str(unit_price),
                     "price_system": str(quote_price),
                     "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
                     "custom_cost_desc": "", "custom_cost_price": "",
                     "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO",
-                    "battery_compliance": "NO", "warranty": "5 year",
-                    "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
-                    "submission_date": "", "submitted_to": "",
+                    "battery_compliance": "NO",
+                    "warranty": str(q_warranty_years),
+                    "dollar_rate": q_dollar_rate,
+                    "base_partcode": _base_partcode,
+                    "quote_format": q_fmt or "",
+                    "remarks": "", "submission_date": "", "submitted_to": "",
                     "quote_code": code, "sol_no": str(sol_no),
                 }, db_path=user_inq_db)
         else:
@@ -679,15 +755,18 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                 "capacity_ah": str(_crow.get("ampere_capacity", "") or ""),
                 "centre_tap": str(body.centre_tap or ""), "cell_type": str(body.cell_type or ""),
                 "ageing_type": ageing_type, "backup_time_min": backup_time,
-                "part_code": str(body.partcode or ""),
+                "part_code": str(_part_code),
                 "qty_system": str(body.quantity), "rate_system": str(unit_price),
                 "price_system": str(quote_price),
                 "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
                 "custom_cost_desc": "", "custom_cost_price": "",
                 "datasheet": "NO", "sizing_sheet": "NO", "gad": "NO",
-                "battery_compliance": "NO", "warranty": "5 year",
-                "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
-                "submission_date": "", "submitted_to": "",
+                "battery_compliance": "NO",
+                "warranty": str(q_warranty_years),
+                "dollar_rate": q_dollar_rate,
+                "base_partcode": _base_partcode,
+                "quote_format": q_fmt or "",
+                "remarks": "", "submission_date": "", "submitted_to": "",
                 "quote_code": code, "sol_no": str(sol_no),
             }, db_path=user_inq_db)
     except Exception:
@@ -913,12 +992,13 @@ def export_word(code: str, scope: str = Query("regular"), user=Depends(get_curre
     except Exception as e:
         raise HTTPException(500, str(e))
 
-    try:
-        from inquiry_db import push_to_global as _push_to_global
-        user_inq_db = get_user_inquiry_db(user["username"])
-        _push_to_global(code, user_inq_db)
-    except Exception:
-        pass
+    # DISABLED: inquiry auto-sync replaced by pending export history
+    # try:
+    #     from inquiry_db import push_to_global as _push_to_global
+    #     user_inq_db = get_user_inquiry_db(user["username"])
+    #     _push_to_global(code, user_inq_db)
+    # except Exception:
+    #     pass
 
     fname = f"Quote_{code}.docx"
     return FileResponse(
@@ -948,12 +1028,13 @@ def export_pdf(code: str, scope: str = Query("regular"), user=Depends(get_curren
         raise HTTPException(501, "PDF export requires Microsoft Word installed on the server")
     except Exception as e:
         raise HTTPException(500, str(e))
-    try:
-        from inquiry_db import push_to_global as _push_to_global
-        user_inq_db = get_user_inquiry_db(user["username"])
-        _push_to_global(code, user_inq_db)
-    except Exception:
-        pass
+    # DISABLED: inquiry auto-sync replaced by pending export history
+    # try:
+    #     from inquiry_db import push_to_global as _push_to_global
+    #     user_inq_db = get_user_inquiry_db(user["username"])
+    #     _push_to_global(code, user_inq_db)
+    # except Exception:
+    #     pass
     return FileResponse(pdf_path, media_type="application/pdf", filename=f"Quote_{code}.pdf")
 
 

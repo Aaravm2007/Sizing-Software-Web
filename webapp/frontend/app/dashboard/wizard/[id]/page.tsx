@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { PendingLinkDialog } from "@/components/pending-link-dialog";
 
 const FORMATS = ["High voltage", "Low voltage", "Extended Warranty High Voltage", "Extended Warranty Low Voltage", "Low & High Voltage Export"];
 const PRICE_OPTIONS = ["A", "B-5", "B", "B+5", "C", "C+5", "custom"] as const;
@@ -43,7 +44,10 @@ interface ColState {
   calc_done: boolean;
   calculated_load_kw: string;
   number_of_cells: string;
+  max_charging_voltage: string;
+  end_cell_voltage: string;
   energy_required_kwh: string;
+  total_available_energy_kwh: string;
   capacity_required_ah: string;
   cap_with_ageing_ah: string;
   cap_with_design_margin_ah: string;
@@ -68,7 +72,9 @@ const EMPTY_COL = (): ColState => ({
   centre_tap: "Non Centre Tap", cell_type: "Prismatic",
   calc_done: false,
   calculated_load_kw: "", number_of_cells: "",
-  energy_required_kwh: "", capacity_required_ah: "",
+  max_charging_voltage: "", end_cell_voltage: "",
+  energy_required_kwh: "", total_available_energy_kwh: "",
+  capacity_required_ah: "",
   cap_with_ageing_ah: "", cap_with_design_margin_ah: "",
   cap_with_dod_margin_ah: "", cap_with_derating_ah: "",
   nearest_capacity_ah: "", offered_battery_config: "",
@@ -118,6 +124,11 @@ export default function WizardComparePage() {
   // section collapse state
   const [showSizing,    setShowSizing]    = useState(true);
   const [showCosting,   setShowCosting]   = useState(true);
+
+  // pending link state for sizing export
+  const [pendingLinkOpen,    setPendingLinkOpen]    = useState(false);
+  const [pendingExportData,  setPendingExportData]  = useState<Record<string, string>>({ export_type: "sizing_excel" });
+  const [pendingExportFn,    setPendingExportFn]    = useState<(() => void) | null>(null);
 
   // ── load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -198,9 +209,12 @@ export default function WizardComparePage() {
       });
       return {
         ...col, calc_done: true,
-        calculated_load_kw:       String(out.calculatedLoadKw),
-        number_of_cells:          String(out.numberOfCells),
-        energy_required_kwh:      String(out.energyRequiredKwh),
+        calculated_load_kw:         String(out.calculatedLoadKw),
+        number_of_cells:            String(out.numberOfCells),
+        max_charging_voltage:       String(out.maxChargingVoltage),
+        end_cell_voltage:           String(out.endCellVoltage),
+        energy_required_kwh:        String(out.energyRequiredKwh),
+        total_available_energy_kwh: String(out.totalAvailableEnergyKwh),
         capacity_required_ah:     String(out.capacityRequiredAh),
         cap_with_ageing_ah:       String(out.capWithAgeingAh),
         cap_with_design_margin_ah:String(out.capWithDesignMarginAh),
@@ -360,8 +374,46 @@ export default function WizardComparePage() {
       toast.error(apiErr(e, "Export failed"));
     }
   };
-  const handleExportSizing    = () => _doExportSizing("xlsx");
-  const handleExportSizingPdf = () => _doExportSizing("pdf");
+
+  const handleExportSizing = () => {
+    const first = cols.find(c => c.offered_battery_config && c.offered_battery_config !== "—");
+    setPendingExportData({
+      export_type: "sizing_excel",
+      ups_make: first?.ups_make ?? "",
+      ups_model: first?.ups_model ?? "",
+      ups_kva: first?.ups_rating_kva ?? "",
+      actual_load_kva: first?.actual_load_kva ?? "",
+      load_kw: first?.actual_load_kw ?? "",
+      power_factor: first?.power_factor ?? "",
+      inverter_efficiency: first?.inverter_efficiency ?? "",
+      dc_voltage: first?.nominal_dc_voltage ?? "",
+      backup_min: first?.backup_requirement_min ?? "",
+      cell_chemistry: first?.cell_chemistry ?? "",
+      capacity_ah: first?.nearest_capacity_ah ?? "",
+    });
+    setPendingExportFn(() => () => _doExportSizing("xlsx"));
+    setPendingLinkOpen(true);
+  };
+
+  const handleExportSizingPdf = () => {
+    const first = cols.find(c => c.offered_battery_config && c.offered_battery_config !== "—");
+    setPendingExportData({
+      export_type: "sizing_pdf",
+      ups_make: first?.ups_make ?? "",
+      ups_model: first?.ups_model ?? "",
+      ups_kva: first?.ups_rating_kva ?? "",
+      actual_load_kva: first?.actual_load_kva ?? "",
+      load_kw: first?.actual_load_kw ?? "",
+      power_factor: first?.power_factor ?? "",
+      inverter_efficiency: first?.inverter_efficiency ?? "",
+      dc_voltage: first?.nominal_dc_voltage ?? "",
+      backup_min: first?.backup_requirement_min ?? "",
+      cell_chemistry: first?.cell_chemistry ?? "",
+      capacity_ah: first?.nearest_capacity_ah ?? "",
+    });
+    setPendingExportFn(() => () => _doExportSizing("pdf"));
+    setPendingLinkOpen(true);
+  };
 
   // COSTING EXPORT DISABLED — do not re-enable without authorisation
   // const _doExportCosting = async (fmt: "xlsx" | "pdf") => {
@@ -890,7 +942,7 @@ export default function WizardComparePage() {
 
       {/* ── Dialog 1: Quote format (first sizing checked) ── */}
       <Dialog open={quoteDialog === "format"} onOpenChange={open => { if (!open) { setQuoteDialog(null); setPendingCol(null); setSelectedCols(prev => { const a = [...prev]; if (pendingCol !== null) a[pendingCol] = false; return a; }); } }}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>New Quote</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-3 py-1">
             <div className="flex flex-col gap-1">
@@ -930,7 +982,7 @@ export default function WizardComparePage() {
 
       {/* ── Dialog 2: Margin & Quantity ── */}
       <Dialog open={quoteDialog === "margin"} onOpenChange={open => { if (!open) { setQuoteDialog(null); setPendingCol(null); setSelectedCols(prev => { const a = [...prev]; if (pendingCol !== null) a[pendingCol] = false; return a; }); } }}>
-        <DialogContent className="sm:max-w-xs">
+        <DialogContent className="sm:max-w-xs max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add Sizing {pendingCol !== null ? pendingCol + 1 : ""} to Quote</DialogTitle>
           </DialogHeader>
@@ -966,6 +1018,14 @@ export default function WizardComparePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PendingLinkDialog
+        open={pendingLinkOpen}
+        exportLabel={`Wizard Sizing: ${projectName} (${pendingExportData.export_type === "sizing_pdf" ? "PDF" : "Excel"})`}
+        exportData={pendingExportData}
+        onClose={() => setPendingLinkOpen(false)}
+        onDone={() => { pendingExportFn?.(); setPendingLinkOpen(false); }}
+      />
     </div>
   );
 }

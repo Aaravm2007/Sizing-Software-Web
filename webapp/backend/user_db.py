@@ -37,3 +37,7 @@ def get_user_wizard_temp_db(username: str) -> str:
 
 def get_user_inquiry_db(username: str) -> str:
     return str(_user_dir(username) / "inquiry.db")
+
+
+def get_user_pending_db(username: str) -> str:
+    return str(_user_dir(username) / "pending.db")

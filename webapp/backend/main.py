@@ -29,7 +29,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routers import auth, sizing, costing, quotation, datafiles, formulas, approvals, inquiry, pending
+from routers import auth, sizing, costing, quotation, datafiles, formulas, approvals, inquiry, pending, po
 app.include_router(auth.router,       prefix="/api/auth",       tags=["auth"])
 app.include_router(sizing.router,     prefix="/api/sizing",     tags=["sizing"])
 app.include_router(costing.router,    prefix="/api/costing",    tags=["costing"])
@@ -39,6 +39,7 @@ app.include_router(formulas.router,   prefix="/api/formulas",   tags=["formulas"
 app.include_router(approvals.router,  prefix="/api/approvals",  tags=["approvals"])
 app.include_router(inquiry.router,    prefix="/api/inquiry",    tags=["inquiry"])
 app.include_router(pending.router,    prefix="/api/pending",    tags=["pending"])
+app.include_router(po.router,         prefix="/api/po",         tags=["po"])
 
 
 @app.get("/api/health")

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { PendingLinkDialog } from "@/components/pending-link-dialog";
 
 export default function GadPage() {
   return (
@@ -21,6 +22,7 @@ function FileBrowserInner({ folderKey, title }: { folderKey: string; title: stri
   const [search, setSearch] = useState(searchParams.get("q") ?? "");
   const [selected, setSelected] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [pendingFile, setPendingFile] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<{ files: string[] }>({
     queryKey: ["datafiles", folderKey, search],
@@ -30,7 +32,7 @@ function FileBrowserInner({ folderKey, title }: { folderKey: string; title: stri
 
   const files = data?.files ?? [];
 
-  const handleDownload = async (filename: string) => {
+  const doDownload = async (filename: string) => {
     setDownloading(true);
     try {
       const res = await api.get(
@@ -49,6 +51,13 @@ function FileBrowserInner({ folderKey, title }: { folderKey: string; title: stri
       setDownloading(false);
     }
   };
+
+  const handleDownload = (filename: string) => {
+    setPendingFile(filename);
+  };
+
+  const partCodeFromFilename = (filename: string) =>
+    filename.replace(/\.[^/.]+$/, "");
 
   return (
     <div className="flex flex-col h-full p-5 gap-4">
@@ -107,6 +116,14 @@ function FileBrowserInner({ folderKey, title }: { folderKey: string; title: stri
           {files.length} file{files.length !== 1 ? "s" : ""} · double-click to download
         </span>
       </div>
+
+      <PendingLinkDialog
+        open={!!pendingFile}
+        exportLabel={`${title}: ${pendingFile ?? ""}`}
+        exportData={{ export_type: "gad", gad_name: pendingFile ?? "", part_code: partCodeFromFilename(pendingFile ?? "") }}
+        onClose={() => setPendingFile(null)}
+        onDone={() => pendingFile && doDownload(pendingFile)}
+      />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 const DC_VOLTAGES = [12, 24, 36, 48, 72, 96, 120, 144, 192, 240, 336, 360, 384, 408, 480, 512, 528, 576];
 const CHEMISTRIES = ["LFP"];
 const QUOTE_FORMATS = ["High voltage","Low voltage","Extended Warranty High Voltage","Extended Warranty Low Voltage","Low & High Voltage Export"];
+const EXTENDED_FORMATS = new Set(["Extended Warranty High Voltage","Extended Warranty Low Voltage"]);
 const PRICE_OPTIONS = [
   { label: "A (Cost)",    value: "A",   mult: 1.00 },
   { label: "A+5% (B-5)", value: "B-5", mult: 1.05 },
@@ -95,6 +96,97 @@ const INPUT_TRIGGER_KEYS: (keyof FormState)[] = [
   "derating_factor_percent", "cell_chemistry", "nearest_capacity_ah",
 ];
 
+const CELL_V_MAP: Record<string, { max: number; end: number }> = {
+  LFP: { max: 3.6, end: 2.8 },
+  NPM: { max: 4.2, end: 3.0 },
+};
+
+function recalcDownstream(field: keyof FormState, s: FormState): FormState {
+  const r1 = (v: number) => String(Math.round(v * 10) / 10);
+  const num = (k: keyof FormState) => parseFloat(s[k] as string) || 0;
+
+  // Raw intermediates — initialised from current form; overwritten by cascade
+  // so that each step uses full-precision input from the previous step,
+  // matching old-app behaviour (display rounds, computation does not).
+  let rawEndV   = num("end_cell_voltage");
+  let rawEnergy = num("energy_required_kwh");
+  let rawCapBase = num("capacity_required_ah");
+  let rawCapAge  = num("cap_with_ageing_ah");
+  let rawCapDm   = num("cap_with_design_margin_ah");
+  let rawCapDod  = num("cap_with_dod_margin_ah");
+  let rawCapDer  = num("cap_with_derating_factor_ah");
+
+  let doCapacity = false, doAgeing = false, doDm = false, doDod = false, doDerating = false, doBackup = false;
+
+  if (field === "number_of_cells") {
+    const cells = num("number_of_cells");
+    const chem = CELL_V_MAP[s.cell_chemistry] ?? CELL_V_MAP.LFP;
+    rawEndV = cells * chem.end;
+    s = { ...s, max_charging_voltage: r1(cells * chem.max), end_cell_voltage: r1(rawEndV) };
+    doCapacity = true;
+  } else if (field === "calculated_load_kw") {
+    rawEnergy = (num("calculated_load_kw") * num("backup_requirement_min")) / 60;
+    s = { ...s, energy_required_kwh: r1(rawEnergy) };
+    doCapacity = true;
+  } else if (field === "energy_required_kwh" || field === "end_cell_voltage") {
+    // rawEnergy / rawEndV already initialised from s (which holds the user's typed value)
+    doCapacity = true;
+  } else if (field === "capacity_required_ah") {
+    doAgeing = true;
+  } else if (field === "cap_with_ageing_ah") {
+    doDm = true;
+  } else if (field === "cap_with_design_margin_ah") {
+    doDod = true;
+  } else if (field === "cap_with_dod_margin_ah") {
+    doDerating = true;
+  } else if (field === "cap_with_derating_factor_ah") {
+    doBackup = true;
+  }
+
+  if (doCapacity) {
+    if (rawEndV > 0) {
+      rawCapBase = (rawEnergy * 1000) / rawEndV;
+      s = { ...s, capacity_required_ah: r1(rawCapBase) };
+    }
+    doAgeing = true;
+  }
+
+  if (doAgeing) {
+    rawCapAge = rawCapBase * (1 + num("ageing_percent") / 100);
+    s = { ...s, cap_with_ageing_ah: r1(rawCapAge) };
+    doDm = true;
+  }
+
+  if (doDm) {
+    rawCapDm = rawCapAge * (1 + num("design_margin_percent") / 100);
+    s = { ...s, cap_with_design_margin_ah: r1(rawCapDm) };
+    doDod = true;
+  }
+
+  if (doDod) {
+    const dod = num("dod_margin_percent");
+    rawCapDod = dod > 0 ? rawCapDm / (dod / 100) : rawCapDm;
+    s = { ...s, cap_with_dod_margin_ah: r1(rawCapDod) };
+    doDerating = true;
+  }
+
+  if (doDerating) {
+    rawCapDer = rawCapDod * (1 + num("derating_factor_percent") / 100);
+    s = { ...s, cap_with_derating_factor_ah: r1(rawCapDer) };
+    doBackup = true;
+  }
+
+  if (doBackup) {
+    const nearest = num("nearest_capacity_ah");
+    const backupMin = num("backup_requirement_min");
+    if (rawCapDer > 0 && nearest > 0) {
+      s = { ...s, backup_time_min: String(Math.floor((backupMin / rawCapDer) * nearest)) };
+    }
+  }
+
+  return s;
+}
+
 function n(v: string) { return parseFloat(v) || 0; }
 function s(v: number | string | undefined | null) { return v === undefined || v === null ? "" : String(v); }
 function sNum(v: number | string | undefined | null) { return (!v && v !== 0) || v === 0 ? "" : String(v); }
@@ -107,7 +199,6 @@ export default function SizingFormPage() {
   const qc = useQueryClient();
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [outputsLocked, setOutputsLocked] = useState(false);
   const prevInputSig = useRef("");
   const isDirty = useRef(false);
   const isAutoSave = useRef(false);
@@ -157,7 +248,6 @@ export default function SizingFormPage() {
       total_available_energy_kwh: sNum(existing.total_available_energy_kwh),
       backup_time_min: sNum(existing.backup_time_min),
     });
-    setOutputsLocked(false);
   }, [existing]);
 
   const applyCalc = useCallback((f: FormState): FormState => {
@@ -198,9 +288,8 @@ export default function SizingFormPage() {
     const sig = INPUT_TRIGGER_KEYS.map((k) => form[k]).join("|");
     if (sig === prevInputSig.current) return;
     prevInputSig.current = sig;
-    if (outputsLocked) return;
     setForm((f) => applyCalc(f));
-  }, [form, outputsLocked, applyCalc]);
+  }, [form, applyCalc]);
 
   useEffect(() => {
     if (!isDirty.current) return;
@@ -216,11 +305,17 @@ export default function SizingFormPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
 
-  const set = (k: keyof FormState, isOutput = false) =>
+  const set = (k: keyof FormState) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       isDirty.current = true;
       setForm((f) => ({ ...f, [k]: e.target.value }));
-      if (isOutput) setOutputsLocked(true);
+    };
+
+  const setOutput = (k: keyof FormState) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      isDirty.current = true;
+      const val = e.target.value;
+      setForm((f) => recalcDownstream(k, { ...f, [k]: val }));
     };
 
   const saveMut = useMutation({
@@ -308,6 +403,8 @@ export default function SizingFormPage() {
   const [nqPriceOption, setNqPriceOption] = useState("B");
   const [nqCustomPct, setNqCustomPct] = useState("30");
   const [nqQuantity, setNqQuantity] = useState("1");
+  const [nqWarranty, setNqWarranty] = useState("5");
+  const [nqDollarRate, setNqDollarRate] = useState("");
 
   const { data: existingQuotes = [] } = useQuery<{code:string;date:string;customer_name:string}[]>({
     queryKey: ["quotes"],
@@ -367,6 +464,8 @@ export default function SizingFormPage() {
     setNqPriceOption("B");
     setNqCustomPct("30");
     setNqQuantity("1");
+    setNqWarranty("5");
+    setNqDollarRate("");
     setAddToQuoteOpen(true);
   };
 
@@ -380,6 +479,8 @@ export default function SizingFormPage() {
           code: nqCode, date: nqDate, customer_name: nqCustomer,
           solution_provider: nqProvider, sales_person: nqSalesPerson,
           format_name: nqFormat,
+          dollar_rate: nqDollarRate,
+          warranty_years: parseInt(nqWarranty) || 5,
         });
         code = nqCode;
       } else {
@@ -491,14 +592,9 @@ setAddToQuoteOpen(false);
         <div className="flex flex-col gap-3 border rounded-md p-4">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">Solution</h2>
-            <div className="flex items-center gap-3">
-              {outputsLocked && (
-                <span className="text-xs text-amber-500">Outputs manually edited</span>
-              )}
-              <Button size="sm" variant="outline" onClick={() => { setForm((f) => applyCalc(f)); setOutputsLocked(false); toast.success("Recalculated"); }}>
-                Recalculate
-              </Button>
-            </div>
+            <Button size="sm" variant="outline" onClick={() => { setForm((f) => applyCalc(f)); toast.success("Recalculated"); }}>
+              Recalculate
+            </Button>
           </div>
 
           {/* E11 */}
@@ -523,32 +619,32 @@ setAddToQuoteOpen(false);
 
           {/* E12 */}
           <OutRow label="Calculated Load (kW)">
-            <Input type="number" value={form.calculated_load_kw} onChange={set("calculated_load_kw", true)} />
+            <Input type="number" value={form.calculated_load_kw} onChange={setOutput("calculated_load_kw")} />
           </OutRow>
 
           {/* derived */}
           <OutRow label="Number of Cells">
-            <Input type="number" value={form.number_of_cells} onChange={set("number_of_cells", true)} />
+            <Input type="number" value={form.number_of_cells} onChange={setOutput("number_of_cells")} />
           </OutRow>
 
           {/* E13 */}
           <OutRow label="Max Charging Voltage (V)">
-            <Input type="number" value={form.max_charging_voltage} onChange={set("max_charging_voltage", true)} />
+            <Input type="number" value={form.max_charging_voltage} onChange={setOutput("max_charging_voltage")} />
           </OutRow>
 
           {/* E14 */}
           <OutRow label="End Cell Voltage (V)">
-            <Input type="number" value={form.end_cell_voltage} onChange={set("end_cell_voltage", true)} />
+            <Input type="number" value={form.end_cell_voltage} onChange={setOutput("end_cell_voltage")} />
           </OutRow>
 
           {/* E17 */}
           <OutRow label="Energy Required (kWh)">
-            <Input type="number" value={form.energy_required_kwh} onChange={set("energy_required_kwh", true)} />
+            <Input type="number" value={form.energy_required_kwh} onChange={setOutput("energy_required_kwh")} />
           </OutRow>
 
           {/* E18 */}
           <OutRow label="Capacity Required (Ah)">
-            <Input type="number" value={form.capacity_required_ah} onChange={set("capacity_required_ah", true)} />
+            <Input type="number" value={form.capacity_required_ah} onChange={setOutput("capacity_required_ah")} />
           </OutRow>
 
           {/* E19 */}
@@ -558,7 +654,7 @@ setAddToQuoteOpen(false);
 
           {/* E23 */}
           <OutRow label="Cap req w/ Ageing (Ah)">
-            <Input type="number" value={form.cap_with_ageing_ah} onChange={set("cap_with_ageing_ah", true)} />
+            <Input type="number" value={form.cap_with_ageing_ah} onChange={setOutput("cap_with_ageing_ah")} />
           </OutRow>
 
           {/* E20 */}
@@ -568,7 +664,7 @@ setAddToQuoteOpen(false);
 
           {/* E24 */}
           <OutRow label="Cap req w/ Design Margin (Ah)">
-            <Input type="number" value={form.cap_with_design_margin_ah} onChange={set("cap_with_design_margin_ah", true)} />
+            <Input type="number" value={form.cap_with_design_margin_ah} onChange={setOutput("cap_with_design_margin_ah")} />
           </OutRow>
 
           {/* E21 */}
@@ -578,7 +674,7 @@ setAddToQuoteOpen(false);
 
           {/* E25 */}
           <OutRow label="Cap req w/ DOD (Ah)">
-            <Input type="number" value={form.cap_with_dod_margin_ah} onChange={set("cap_with_dod_margin_ah", true)} />
+            <Input type="number" value={form.cap_with_dod_margin_ah} onChange={setOutput("cap_with_dod_margin_ah")} />
           </OutRow>
 
           {/* E22 */}
@@ -588,7 +684,7 @@ setAddToQuoteOpen(false);
 
           {/* E26 */}
           <OutRow label="Cap req w/ Derating (Ah)">
-            <Input type="number" value={form.cap_with_derating_factor_ah} onChange={set("cap_with_derating_factor_ah", true)} />
+            <Input type="number" value={form.cap_with_derating_factor_ah} onChange={setOutput("cap_with_derating_factor_ah")} />
           </OutRow>
 
           {/* E27 */}
@@ -600,7 +696,7 @@ setAddToQuoteOpen(false);
 
           {/* E28 */}
           <OutRow label="Offered Battery Configuration">
-            <Input value={form.offered_battery_config} onChange={set("offered_battery_config", true)} />
+            <Input value={form.offered_battery_config} onChange={set("offered_battery_config")} />
           </OutRow>
 
           {form.offered_battery_config && (
@@ -637,19 +733,19 @@ setAddToQuoteOpen(false);
 
           {/* E29 */}
           <OutRow label="Total Available Energy (kWh)">
-            <Input type="number" value={form.total_available_energy_kwh} onChange={set("total_available_energy_kwh", true)} />
+            <Input type="number" value={form.total_available_energy_kwh} onChange={setOutput("total_available_energy_kwh")} />
           </OutRow>
 
           {/* E30 */}
           <OutRow label="Backup Time (Min)">
-            <Input type="number" value={form.backup_time_min} onChange={set("backup_time_min", true)} />
+            <Input type="number" value={form.backup_time_min} onChange={setOutput("backup_time_min")} />
           </OutRow>
         </div>
       </div>
 
       {/* ── Ah Range Dialog ── */}
       <Dialog open={ahRangeOpen} onOpenChange={setAhRangeOpen}>
-        <DialogContent className="sm:max-w-xs">
+        <DialogContent className="sm:max-w-xs max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Nearest Cell Range (Ah)</DialogTitle></DialogHeader>
           <div className="py-2 flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
@@ -669,7 +765,7 @@ setAddToQuoteOpen(false);
 
       {/* ── Add to Quote Dialog ── */}
       <Dialog open={addToQuoteOpen} onOpenChange={setAddToQuoteOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Add to Quote</DialogTitle></DialogHeader>
           <div className="py-2 flex flex-col gap-4">
             <div className="flex border rounded-md overflow-hidden text-sm">
@@ -683,7 +779,11 @@ setAddToQuoteOpen(false);
               <div className="flex flex-col gap-3">
                 <QRow label="Format">
                   <select className="h-9 rounded-md border px-3 text-sm bg-background w-full"
-                    value={nqFormat} onChange={(e) => setNqFormat(e.target.value)}>
+                    value={nqFormat} onChange={(e) => {
+                      const fmt = e.target.value;
+                      setNqFormat(fmt);
+                      setNqWarranty(EXTENDED_FORMATS.has(fmt) ? "" : "5");
+                    }}>
                     {QUOTE_FORMATS.map((f) => <option key={f} value={f}>{f}</option>)}
                   </select>
                 </QRow>
@@ -692,6 +792,23 @@ setAddToQuoteOpen(false);
                 <QRow label="Customer"><Input value={nqCustomer} onChange={(e) => setNqCustomer(e.target.value)} /></QRow>
                 <QRow label="Provider"><Input value={nqProvider} onChange={(e) => setNqProvider(e.target.value)} /></QRow>
                 <QRow label="Sales Person"><Input value={nqSalesPerson} onChange={(e) => setNqSalesPerson(e.target.value)} /></QRow>
+                <QRow label="Dollar Rate">
+                  <input type="number" min="0" step="0.01" value={nqDollarRate}
+                    onChange={(e) => setNqDollarRate(e.target.value)}
+                    placeholder="e.g. 85"
+                    className="h-8 w-28 rounded-md border px-2 text-sm bg-background" />
+                </QRow>
+                <QRow label="Warranty (yrs)">
+                  <input type="number" min="1" value={nqWarranty}
+                    onChange={(e) => setNqWarranty(e.target.value)}
+                    placeholder={EXTENDED_FORMATS.has(nqFormat) ? "Enter years" : "5"}
+                    className="h-8 w-24 rounded-md border px-2 text-sm bg-background" />
+                </QRow>
+                {EXTENDED_FORMATS.has(nqFormat) && nqWarranty && (
+                  <p className="text-xs text-muted-foreground pl-[128px]">
+                    Part code: {selectedCosting?.partcode}-{nqWarranty}W
+                  </p>
+                )}
               </div>
             )}
 

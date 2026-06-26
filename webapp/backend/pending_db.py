@@ -9,6 +9,7 @@ _MUTABLE = [
     "received_date", "received_time", "mail_for", "oem_dealer",
     "end_customer", "kva_rating", "quantity", "backup_time",
     "reply_to", "assigned_to", "status", "remarks", "priority", "inquiry_code",
+    "submission_date", "submitted_to", "submitted_by",
 ]
 
 
@@ -35,16 +36,20 @@ def init_db(path=None):
                 backup_time   TEXT DEFAULT '',
                 reply_to      TEXT DEFAULT '',
                 assigned_to   TEXT DEFAULT '',
-                status        TEXT DEFAULT 'pending',
-                remarks       TEXT DEFAULT '',
-                priority      TEXT DEFAULT 'relaxed',
-                created_at    INTEGER,
-                created_by    TEXT DEFAULT ''
+                status           TEXT DEFAULT 'pending',
+                remarks          TEXT DEFAULT '',
+                priority         TEXT DEFAULT 'relaxed',
+                submission_date  TEXT DEFAULT '',
+                submitted_to     TEXT DEFAULT '',
+                submitted_by     TEXT DEFAULT '',
+                created_at       INTEGER,
+                created_by       TEXT DEFAULT ''
             )
         """)
         for col, default in [
             ("remarks", "''"), ("priority", "'relaxed'"),
             ("inquiry_code", "''"),
+            ("submission_date", "''"), ("submitted_to", "''"), ("submitted_by", "''"),
         ]:
             try:
                 c.execute(f"ALTER TABLE pending ADD COLUMN {col} TEXT DEFAULT {default}")
@@ -84,8 +89,9 @@ def push_row(data: dict, username: str, path=None) -> int:
             """INSERT INTO pending
                (sr_no, inquiry_code, received_date, received_time, mail_for, oem_dealer,
                 end_customer, kva_rating, quantity, backup_time, reply_to,
-                assigned_to, status, remarks, priority, created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                assigned_to, status, remarks, priority,
+                submission_date, submitted_to, created_at, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 sr,
                 data.get("inquiry_code", ""),
@@ -102,6 +108,8 @@ def push_row(data: dict, username: str, path=None) -> int:
                 data.get("status", "pending"),
                 data.get("remarks", ""),
                 data.get("priority", "relaxed"),
+                data.get("submission_date", ""),
+                data.get("submitted_to", ""),
                 int(time.time() * 1000),
                 username,
             ),

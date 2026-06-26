@@ -339,6 +339,27 @@ def _copy_images(src_ws, dst_ws):
             pass
 
 
+def _dash(v):
+    """Return '-' for any blank/zero value so exported cells never show empty."""
+    if v is None or v == "" or v == 0 or v == 0.0:
+        return "-"
+    return v
+
+
+def _write_cell(ws, addr: str, value):
+    """Write value and force black font so theme-based light colors don't hide text."""
+    from openpyxl.styles import Font
+    from copy import copy as _copy
+    cell = ws[addr]
+    cell.value = value
+    existing = cell.font
+    cell.font = Font(
+        name=existing.name, size=existing.size, bold=existing.bold,
+        italic=existing.italic, underline=existing.underline,
+        strike=existing.strike, color="FF000000",
+    )
+
+
 def _build_excel(name: str, sr_no: Optional[int], db_path: str = None) -> str:
     import openpyxl
 
@@ -375,10 +396,10 @@ def _build_excel(name: str, sr_no: Optional[int], db_path: str = None) -> str:
             ws.merge_cells(str(mr))
         _copy_images(template_ws, ws)
         for key, cell_addr in SIZING_CELL_MAP.items():
-            ws[cell_addr] = data.get(key, "")
-        ws["D7"] = data["_load_label"]
-        ws["D8"] = data["_load_value"]
-        ws["D30"] = data["_backup_label"]
+            _write_cell(ws, cell_addr, _dash(data.get(key, "")))
+        _write_cell(ws, "D7", data["_load_label"])
+        _write_cell(ws, "D8", _dash(data["_load_value"]))
+        _write_cell(ws, "D30", data["_backup_label"])
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     out_wb.save(tmp.name)
@@ -393,38 +414,31 @@ def export_excel(name: str, sr_no: Optional[int] = None, user=Depends(get_curren
     except Exception as e:
         raise HTTPException(500, str(e))
 
-    if sr_no:
-        try:
-            import time as _time
-            from inquiry_db import push_row as _push_inq
-            srow = fetch_sizing_by_sr(name, sr_no, db_path=sdb)
-            if srow:
-                _yr = _time.localtime().tm_year % 100
-                _push_inq({
-                    "inquiry_date": _time.strftime("%d/%m/%Y"),
-                    "type": "Sizing", "sales_person": "",
-                    "solution_provider": str(srow[2] or ""),
-                    "project_customer": str(srow[1] or ""),
-                    "ups_make": str(srow[3] or ""), "ups_model": str(srow[4] or ""),
-                    "ups_kva": str(srow[5] or ""),
-                    "actual_load_kva": str(srow[6] or ""), "load_kw": str(srow[7] or ""),
-                    "power_factor": str(srow[8] or ""), "inverter_efficiency": str(srow[9] or ""),
-                    "dc_voltage": str(srow[10] or ""), "backup_min": str(srow[11] or ""),
-                    "cell_chemistry": str(srow[17] or ""),
-                    "ageing_pct": str(srow[12] or ""), "design_margin_pct": str(srow[13] or ""),
-                    "dod_margin_pct": str(srow[14] or ""), "derating_pct": str(srow[15] or ""),
-                    "capacity_ah": str(srow[27] or ""),
-                    "centre_tap": "", "cell_type": "", "part_code": "",
-                    "qty_system": "", "rate_system": "", "price_system": "",
-                    "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
-                    "custom_cost_desc": "", "custom_cost_price": "",
-                    "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO",
-                    "battery_compliance": "NO", "warranty": "5 year",
-                    "remarks": "", "solution_by": "", "entry_by": "", "data_upload_by": "",
-                    "submission_date": "", "submitted_to": "",
-                })
-        except Exception:
-            pass
+    # DISABLED: inquiry auto-sync replaced by pending export history
+    # if sr_no:
+    #     try:
+    #         import time as _time
+    #         from inquiry_db import push_row as _push_inq
+    #         srow = fetch_sizing_by_sr(name, sr_no, db_path=sdb)
+    #         if srow:
+    #             _push_inq({
+    #                 "inquiry_date": _time.strftime("%d/%m/%Y"),
+    #                 "type": "Sizing", "sales_person": "",
+    #                 "solution_provider": str(srow[2] or ""),
+    #                 "project_customer": str(srow[1] or ""),
+    #                 "ups_make": str(srow[3] or ""), "ups_model": str(srow[4] or ""),
+    #                 "ups_kva": str(srow[5] or ""),
+    #                 "actual_load_kva": str(srow[6] or ""), "load_kw": str(srow[7] or ""),
+    #                 "power_factor": str(srow[8] or ""), "inverter_efficiency": str(srow[9] or ""),
+    #                 "dc_voltage": str(srow[10] or ""), "backup_min": str(srow[11] or ""),
+    #                 "cell_chemistry": str(srow[17] or ""),
+    #                 "ageing_pct": str(srow[12] or ""), "design_margin_pct": str(srow[13] or ""),
+    #                 "dod_margin_pct": str(srow[14] or ""), "derating_pct": str(srow[15] or ""),
+    #                 "capacity_ah": str(srow[27] or ""),
+    #                 "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO",
+    #             })
+    #     except Exception:
+    #         pass
 
     fname = f"{name}_sizing{'_'+str(sr_no) if sr_no else '_all'}.xlsx"
     return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -448,7 +462,10 @@ class WizardCol(BaseModel):
     derating_factor_percent: str = ""
     cell_type: str = ""
     calculated_load_kw: str = ""
+    max_charging_voltage: str = ""
+    end_cell_voltage: str = ""
     energy_required_kwh: str = ""
+    total_available_energy_kwh: str = ""
     capacity_required_ah: str = ""
     cap_with_ageing_ah: str = ""
     cap_with_design_margin_ah: str = ""
@@ -507,7 +524,10 @@ def _build_wizard_excel(body: "WizardExportBody") -> str:
             "Backup Requirement (Min)": num(col.backup_requirement_min) or "",
             "Cell Chemistry": col.cell_type,
             "Calculated Load (kW)": num(col.calculated_load_kw) or "",
+            "Max Charging Voltage (V)": num(col.max_charging_voltage) or "",
+            "End Cell Voltage (V)": num(col.end_cell_voltage) or "",
             "Energy Required (kWh)": num(col.energy_required_kwh) or "",
+            "Total Available Energy (kWh)": num(col.total_available_energy_kwh) or "",
             "Capacity Required_Base (Ah)": num(col.capacity_required_ah) or "",
             "Ageing (%)": pct(col.ageing_percent) or "",
             "Design Margin (%)": pct(col.design_margin_percent) or "",
@@ -541,11 +561,10 @@ def _build_wizard_excel(body: "WizardExportBody") -> str:
             ws.merge_cells(str(mr))
         _copy_images(template_ws, ws)
         for key, cell_addr in SIZING_CELL_MAP.items():
-            if key in data:
-                ws[cell_addr] = data[key]
-        ws["D7"] = w_load_label
-        ws["D8"] = w_load_value
-        ws["D30"] = f"Backup Time (Min) at {col.ageing_type or 'BOL'}"
+            _write_cell(ws, cell_addr, _dash(data.get(key, "")))
+        _write_cell(ws, "D7", w_load_label)
+        _write_cell(ws, "D8", _dash(w_load_value))
+        _write_cell(ws, "D30", f"Backup Time (Min) at {col.ageing_type or 'BOL'}")
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     out_wb.save(tmp.name)
@@ -671,17 +690,17 @@ def calculate(b: CalcRequest, _=Depends(get_current_user)):
                      "capacity_required", "cap_with_ageing", "cap_with_design_margin",
                      "cap_with_dod", "cap_with_derating"]:
             if name in formulas:
-                ctx[name] = round(eval_formula(formulas[name], ctx), 2)
+                ctx[name] = round(eval_formula(formulas[name], ctx), 1)
 
         if b.nearest_capacity > 0 and ctx.get("cap_with_derating", 0) > 0:
             for name in ["backup_time", "total_energy"]:
                 if name in formulas:
-                    ctx[name] = round(eval_formula(formulas[name], ctx), 2)
+                    ctx[name] = eval_formula(formulas[name], ctx)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
     result = {
-        "calculated_load_kw":          round(ctx.get("load", 0), 2),
+        "calculated_load_kw":          round(ctx.get("load", 0), 1),
         "number_of_cells":             cells,
         "max_charging_voltage":        round(ctx.get("max_charging_voltage", 0), 1),
         "end_cell_voltage":            round(ctx.get("end_cell_voltage", 0), 1),
@@ -695,7 +714,7 @@ def calculate(b: CalcRequest, _=Depends(get_current_user)):
 
     if b.nearest_capacity > 0 and ctx.get("cap_with_derating", 0) > 0:
         result["backup_time_min"]            = ctx.get("backup_time", 0)
-        result["total_available_energy_kwh"] = round(ctx.get("total_energy", 0), 3)
+        result["total_available_energy_kwh"] = ctx.get("total_energy", 0)
         result["offered_battery_config"]     = f"{int(b.nominal_dc_voltage)}V {int(b.nearest_capacity)}Ah"
 
     return result

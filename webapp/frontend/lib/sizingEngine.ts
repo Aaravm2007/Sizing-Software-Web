@@ -101,36 +101,39 @@ export function runCalculation(
     nominalDcVoltage, backupRequirementMin, ageingPct, designMarginPct,
     dodMarginPct, deratingPct, cellChemistry, nearestCapacity } = inputs;
 
-  const load = SizingEngine.calculateLoad(actualKw, actualKva, upsKva, powerFactor, inverterEfficiency);
-  const cells = SizingEngine.numberOfCells(nominalDcVoltage);
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+
+  // Full-precision chain — round only at the return boundary, matching old-app behaviour
+  const load    = SizingEngine.calculateLoad(actualKw, actualKva, upsKva, powerFactor, inverterEfficiency);
+  const cells   = SizingEngine.numberOfCells(nominalDcVoltage);
   const { maxChargeVoltage, endCellVoltage } = SizingEngine.voltageValues(cells, cellChemistry);
-  const energy = SizingEngine.energyRequired(load, backupRequirementMin);
-  const capBase = SizingEngine.capacityRequired(energy, endCellVoltage);
-  const capAge = SizingEngine.capacityWithAgeing(capBase, ageingPct);
-  const capDm = SizingEngine.capacityWithDesignMargin(capAge, designMarginPct);
-  const capDod = SizingEngine.capacityWithDod(capDm, dodMarginPct);
-  const capDer = SizingEngine.capacityWithDerating(capDod, deratingPct);
+  const energy  = (load * backupRequirementMin) / 60;
+  const capBase = endCellVoltage ? (energy * 1000) / endCellVoltage : 0;
+  const capAge  = capBase * (1 + ageingPct / 100);
+  const capDm   = capAge  * (1 + designMarginPct / 100);
+  const capDod  = dodMarginPct > 0 ? capDm / (dodMarginPct / 100) : capDm;
+  const capDer  = capDod  * (1 + deratingPct / 100);
 
   let backupTime = 0, totalEnergy = 0, config = "";
   if (nearestCapacity > 0 && capDer > 0) {
-    backupTime = SizingEngine.backupTime(backupRequirementMin, capDer, nearestCapacity);
+    backupTime  = Math.floor((backupRequirementMin / capDer) * nearestCapacity);
     totalEnergy = SizingEngine.totalAvailableEnergy(nominalDcVoltage, nearestCapacity);
-    config = SizingEngine.offeredBatteryConfig(nominalDcVoltage, nearestCapacity);
+    config      = SizingEngine.offeredBatteryConfig(nominalDcVoltage, nearestCapacity);
   }
 
   return {
-    calculatedLoadKw: Math.round(load * 100) / 100,
-    numberOfCells: cells,
-    maxChargingVoltage: maxChargeVoltage,
-    endCellVoltage: endCellVoltage,
-    energyRequiredKwh: energy,
-    capacityRequiredAh: capBase,
-    capWithAgeingAh: capAge,
-    capWithDesignMarginAh: capDm,
-    capWithDodAh: capDod,
-    capWithDeratingAh: capDer,
-    backupTimeMin: backupTime,
+    calculatedLoadKw:        r1(load),
+    numberOfCells:           cells,
+    maxChargingVoltage:      maxChargeVoltage,
+    endCellVoltage:          endCellVoltage,
+    energyRequiredKwh:       r1(energy),
+    capacityRequiredAh:      r1(capBase),
+    capWithAgeingAh:         r1(capAge),
+    capWithDesignMarginAh:   r1(capDm),
+    capWithDodAh:            r1(capDod),
+    capWithDeratingAh:       r1(capDer),
+    backupTimeMin:           backupTime,
     totalAvailableEnergyKwh: totalEnergy,
-    offeredBatteryConfig: config,
+    offeredBatteryConfig:    config,
   };
 }

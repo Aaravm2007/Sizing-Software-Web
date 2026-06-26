@@ -88,7 +88,7 @@ export default function WizardListPage() {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-xs">
+        <DialogContent className="sm:max-w-xs max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>New Comparison</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-3 py-2">
             <div className="flex flex-col gap-1">

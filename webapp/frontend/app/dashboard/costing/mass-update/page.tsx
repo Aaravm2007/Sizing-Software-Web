@@ -180,7 +180,7 @@ export default function MassUpdatePage() {
 
       {/* Admin confirm dialog */}
       <Dialog open={confirmOpen} onOpenChange={(o) => { setConfirmOpen(o); if (!o) setAdminPass(""); }}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Confirm Mass Update</DialogTitle>
           </DialogHeader>

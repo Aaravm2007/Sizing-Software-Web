@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
 import SubmitApprovalDialog, { type ApprovalItem } from "@/components/SubmitApprovalDialog";
+import { PendingLinkDialog } from "@/components/pending-link-dialog";
 import { getPendingAction, clearPendingAction } from "@/lib/approval-action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +41,7 @@ interface QuoteItem {
   solution_text?: string | null;
   calc_load_unit?: string;
   ageing_type?: string;
+  item_type?: string;
 }
 
 interface CostingRow {
@@ -61,7 +63,7 @@ const PRICE_OPTIONS = [
   { label: "A+25% (C+5)", value: "C+5" },
 ];
 
-const MODULAR_RACKS = [
+const DEFAULT_MODULAR_RACKS = [
   { key: "W=600*D=1000*H=880",  price: 30000 },
   { key: "W=600*D=1000*H=1392", price: 40000 },
   { key: "W=600*D=1000*H=1882", price: 49000 },
@@ -95,6 +97,9 @@ export default function QuoteEditorPage() {
 const [addCostingOpen, setAddCostingOpen] = useState(false);
   const [addModularOpen, setAddModularOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [pendingLinkOpen, setPendingLinkOpen] = useState(false);
+  const [pendingExportFmt, setPendingExportFmt] = useState<"word" | "pdf">("word");
+  const [pendingExportData, setPendingExportData] = useState<Record<string, string>>({ export_type: "quote_word" });
 const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const [pendingAction, setPendingActionState] = useState(() => getPendingAction());
   const pendingForMe = pendingAction?.type === "quotation" ? pendingAction : null;
@@ -116,6 +121,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const [customCostDesc, setCustomCostDesc] = useState("");
   const [customCostPrice, setCustomCostPrice] = useState("");
   const [customCostQty, setCustomCostQty] = useState("1");
+  const [preset, setPreset] = useState<"fire" | "rmd" | "sub" | null>(null);
+  const [presetCount, setPresetCount] = useState("1");
+  const [rmdType, setRmdType] = useState<"hvl" | "efl">("hvl");
 
   // edit meta
   const [editMetaOpen, setEditMetaOpen] = useState(false);
@@ -125,6 +133,8 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const [metaDate, setMetaDate] = useState("");
   const [metaFormat, setMetaFormat] = useState("");
   const [metaCode, setMetaCode] = useState("");
+  const [metaDollarRate, setMetaDollarRate] = useState("");
+  const [metaWarranty, setMetaWarranty] = useState("5");
 
   const openEditMeta = async () => {
     const first = items?.[0];
@@ -138,7 +148,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       const res = await api.get("/api/quotation/quotes");
       const q = (res.data as any[]).find(q => q.code === code);
       setMetaSales(q?.sales_person ?? "");
-    } catch { setMetaSales(""); }
+      setMetaDollarRate(q?.dollar_rate ?? "");
+      setMetaWarranty(q?.warranty_years ?? "5");
+    } catch { setMetaSales(""); setMetaDollarRate(""); setMetaWarranty("5"); }
     setEditMetaOpen(true);
   };
 
@@ -150,6 +162,8 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       date: metaDate,
       format_name: metaFormat,
       new_code: metaCode,
+      dollar_rate: metaDollarRate,
+      warranty_years: metaWarranty,
     }),
     onSuccess: (res) => {
       setEditMetaOpen(false);
@@ -176,6 +190,22 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     queryFn: () => api.get(`/api/quotation/quotes/${encodeURIComponent(code)}/items`).then((r) => r.data),
   });
 
+  const { data: quoteRatesData = [] } = useQuery<{ key: string; value: number }[]>({
+    queryKey: ["quote-rates"],
+    queryFn: () => api.get("/api/formulas/quote-rates").then((r) => r.data),
+    staleTime: 60000,
+  });
+  const quoteRates = Object.fromEntries(quoteRatesData.map((r) => [r.key, r.value]));
+
+  const { data: modularRacksData } = useQuery<{ key: string; price: number }[]>({
+    queryKey: ["modular-rack-rates"],
+    queryFn: () => api.get("/api/formulas/modular-rack-rates").then((r) => r.data),
+    staleTime: 60000,
+  });
+  const MODULAR_RACKS = modularRacksData ?? DEFAULT_MODULAR_RACKS;
+
+
+
   const [localItems, setLocalItems] = useState<QuoteItem[]>([]);
   useEffect(() => { setLocalItems(items ?? []); }, [items]);
 
@@ -186,15 +216,25 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     return `${item.ups_rating}KVA : ${item.backup_requirement}Min Backup${loadLine}\n(Cell Type:${item.celltype})\n(${item.centre_tapping})`;
   };
 
-  const composeSolution = (item: QuoteItem, sn: number | null) =>
-    `Solution${sn ?? "?"}: Lithium Battery Pack\n(${item.batterypartcode}) with\nApprox Backup: ${item.backup_time || "-"}Mins At ${item.ageing_type || "BOL"}\nWith Cabinet and inbuilt BMS`;
+  const composeSolution = (item: QuoteItem, sn: number | null) => {
+    const base = `Solution${sn ?? "?"}: Lithium Battery Pack\n(${item.batterypartcode}) with\nApprox Backup: ${item.backup_time || "-"}Mins At ${item.ageing_type || "BOL"}\nWith Cabinet and inbuilt BMS`;
+    return item.format?.includes("Extended_Warranty")
+      ? base + "\nWith extended warranty as per warranty clause Annexure C"
+      : base;
+  };
+
+  const modularLabel = (item: QuoteItem) =>
+    MODULAR_RACKS.some(r => r.key === item.modular_rack)
+      ? `Modular Battery Rack (${item.modular_rack})`
+      : item.modular_rack;
 
   const openEdit = (item: QuoteItem, sn: number | null) => {
+    const isModular = item.modular_rack && item.modular_rack !== "-";
     setEditItem(item);
     setEditFields({
       quantity: String(item.quantity ?? 1),
-      system_text: item.system_text || composeSystem(item),
-      solution_text: item.solution_text || composeSolution(item, sn),
+      system_text: isModular ? "" : (item.system_text || composeSystem(item)),
+      solution_text: item.solution_text || (isModular ? modularLabel(item) : composeSolution(item, sn)),
     });
     setEditOpen(true);
   };
@@ -288,28 +328,43 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     onError: (e: any) => toast.error(apiErr(e, "Failed")),
   });
 
+  const rFire = quoteRates["fire_suppression"] ?? 6100;
+  const rRmdHvl = quoteRates["rmd_hvl"] ?? 6400;
+  const rRmdEfl = quoteRates["rmd_efl"] ?? 4850;
+  const rSub = quoteRates["subscription"] ?? 1500;
+
+  const resolvePreset = () => {
+    const n = parseInt(presetCount) || 1;
+    if (preset === "fire") return { description: "Fire Suppression System", price: n * rFire, quantity: 1 };
+    if (preset === "rmd") return { description: "Remote Monitoring Device with 1 year Subscription", price: n * (rmdType === "hvl" ? rRmdHvl : rRmdEfl), quantity: 1 };
+    if (preset === "sub") return { description: `${n} year subscription Charges`, price: n * rSub, quantity: 1 };
+    return null;
+  };
+
   const addCustomCostMut = useMutation({
-    mutationFn: () => api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/add-custom-cost`, {
-      description: customCostDesc.trim() || "Custom Item",
-      quantity: parseInt(customCostQty) || 1,
-      price: parseFloat(customCostPrice) || 0,
-    }),
+    mutationFn: () => {
+      const p = resolvePreset();
+      return api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/add-custom-cost`, p ?? {
+        description: customCostDesc.trim() || "Custom Item",
+        quantity: parseInt(customCostQty) || 1,
+        price: parseFloat(customCostPrice) || 0,
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qKey });
       setAddCustomCostOpen(false);
       setCustomCostDesc("");
       setCustomCostPrice("");
       setCustomCostQty("1");
+      setPreset(null);
+      setPresetCount("1");
       toast.success("Custom cost added");
     },
     onError: (e: any) => toast.error(apiErr(e, "Failed")),
   });
 
-  const handleExport = (fmt: "word" | "pdf") => {
+  const doExport = (fmt: "word" | "pdf") => {
     const ext = fmt === "word" ? "docx" : "pdf";
-    const mime = fmt === "word"
-      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      : "application/pdf";
     api.get(`/api/quotation/quotes/${encodeURIComponent(code)}/export/${fmt}`, { responseType: "blob" })
       .then((res) => {
         const url = window.URL.createObjectURL(new Blob([res.data]));
@@ -321,6 +376,13 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         setExportOpen(false);
         api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/save-to-firebase`).catch(() => {});
       }).catch((e) => toast.error(apiErr(e, "Export failed")));
+  };
+
+  const handleExport = (fmt: "word" | "pdf") => {
+    setPendingExportFmt(fmt);
+    setExportOpen(false);
+    setPendingExportData({ export_type: `quote_${fmt}`, quote_code: code });
+    setPendingLinkOpen(true);
   };
 
   const solCount = (idx: number) =>
@@ -363,7 +425,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         <Button variant="outline" onClick={() => setAddModularOpen(true)}>
           Add Modular Rack
         </Button>
-        <Button variant="outline" onClick={() => setAddCustomCostOpen(true)}>
+        <Button variant="outline" onClick={() => { setPreset(null); setPresetCount("1"); setRmdType("hvl"); setAddCustomCostOpen(true); }}>
           Add Custom Cost
         </Button>
         <Button variant="outline" onClick={() => setExportOpen(true)}>Export</Button>
@@ -405,9 +467,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground uppercase font-medium">Solution</span>
                 {isModular ? (
-                  <span>{MODULAR_RACKS.some(r => r.key === item.modular_rack)
-                    ? `Modular Battery Rack (${item.modular_rack})`
-                    : item.modular_rack}</span>
+                  <span className="whitespace-pre-line">{item.solution_text || modularLabel(item)}</span>
                 ) : (
                   <span className="whitespace-pre-line">
                     {item.solution_text || composeSolution(item, sn)}
@@ -437,11 +497,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                 <span>Rs. {total.toLocaleString("en-IN")}/- +GST</span>
               </div>
               <div className="flex flex-col gap-1 mt-1">
-                {!isModular && (
-                  <button className="text-muted-foreground hover:text-foreground" onClick={() => openEdit(item, sn)} title="Edit">
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                )}
+                <button className="text-muted-foreground hover:text-foreground" onClick={() => openEdit(item, sn)} title="Edit">
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
                 <button
                   className="text-destructive hover:text-destructive/80 disabled:opacity-40"
                   onClick={() => deleteMut.mutate(item.sr_no)}
@@ -462,9 +520,17 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         <SubmitApprovalDialog open={!!approvalItem} item={approvalItem} onClose={() => setApprovalItem(null)} />
       )}
 
+      <PendingLinkDialog
+        open={pendingLinkOpen}
+        exportLabel={`Quote ${code} (${pendingExportFmt === "word" ? "Word" : "PDF"})`}
+        exportData={pendingExportData}
+        onClose={() => setPendingLinkOpen(false)}
+        onDone={() => doExport(pendingExportFmt)}
+      />
+
       {/* Edit Quote Meta Dialog */}
       <Dialog open={editMetaOpen} onOpenChange={setEditMetaOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Quote Details</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-3 py-2">
             <div className="flex flex-col gap-1.5">
@@ -499,6 +565,14 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                 ))}
               </select>
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dollar Rate</Label>
+              <Input type="number" min="0" step="0.01" value={metaDollarRate} onChange={e => setMetaDollarRate(e.target.value)} placeholder="e.g. 84.5" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Warranty (yrs)</Label>
+              <Input type="number" min="1" value={metaWarranty} onChange={e => setMetaWarranty(e.target.value)} />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditMetaOpen(false)}>Cancel</Button>
@@ -511,8 +585,10 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
       {/* Edit Item Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>Edit Item</DialogTitle></DialogHeader>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editItem?.modular_rack && editItem.modular_rack !== "-" ? "Edit Modular Rack" : "Edit Item"}</DialogTitle>
+          </DialogHeader>
           <div className="flex flex-col gap-4 py-2">
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quantity</Label>
@@ -524,24 +600,36 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                 onChange={e => setEditFields(f => ({ ...f, quantity: e.target.value }))}
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</Label>
-              <textarea
-                rows={4}
-                className="w-full rounded-md border px-3 py-2 text-sm bg-background resize-y"
-                value={editFields.system_text ?? ""}
-                onChange={e => setEditFields(f => ({ ...f, system_text: e.target.value }))}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Solution</Label>
-              <textarea
-                rows={4}
-                className="w-full rounded-md border px-3 py-2 text-sm bg-background resize-y"
-                value={editFields.solution_text ?? ""}
-                onChange={e => setEditFields(f => ({ ...f, solution_text: e.target.value }))}
-              />
-            </div>
+            {editItem?.modular_rack && editItem.modular_rack !== "-" ? (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description</Label>
+                <textarea
+                  rows={3}
+                  className="w-full rounded-md border px-3 py-2 text-sm bg-background resize-y"
+                  value={editFields.solution_text ?? ""}
+                  onChange={e => setEditFields(f => ({ ...f, solution_text: e.target.value }))}
+                />
+              </div>
+            ) : (<>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">System</Label>
+                <textarea
+                  rows={4}
+                  className="w-full rounded-md border px-3 py-2 text-sm bg-background resize-y"
+                  value={editFields.system_text ?? ""}
+                  onChange={e => setEditFields(f => ({ ...f, system_text: e.target.value }))}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Solution</Label>
+                <textarea
+                  rows={4}
+                  className="w-full rounded-md border px-3 py-2 text-sm bg-background resize-y"
+                  value={editFields.solution_text ?? ""}
+                  onChange={e => setEditFields(f => ({ ...f, solution_text: e.target.value }))}
+                />
+              </div>
+            </>)}
           </div>
           <DialogFooter className="gap-2">
             <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancel</Button>
@@ -552,7 +640,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
       {/* Add from Costing Dialog */}
       <Dialog open={addCostingOpen} onOpenChange={setAddCostingOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Add from Costing</DialogTitle></DialogHeader>
           {costingRows.length === 0 ? (
             <p className="text-muted-foreground text-sm py-4">No costing options in table. Go to Costing first.</p>
@@ -630,7 +718,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
       {/* Add Modular Rack Dialog */}
       <Dialog open={addModularOpen} onOpenChange={setAddModularOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Add Modular Battery Rack</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-4 py-2">
             <div className="flex flex-col gap-2">
@@ -676,27 +764,90 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
       {/* Add Custom Cost Dialog */}
       <Dialog open={addCustomCostOpen} onOpenChange={setAddCustomCostOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Add Custom Cost</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-4 py-2">
-            <div className="flex flex-col gap-1">
-              <Label>Description</Label>
-              <Input placeholder="e.g. Installation charges" value={customCostDesc} onChange={(e) => setCustomCostDesc(e.target.value)} />
+            {/* presets */}
+            <div className="flex flex-col gap-2">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Presets</Label>
+              <div className="flex flex-wrap gap-2">
+                {(["fire", "rmd", "sub"] as const).map((p) => {
+                  const labels = { fire: "Fire Suppression", rmd: "Remote Monitoring Device", sub: "Subscription Charges" };
+                  return (
+                    <button key={p} onClick={() => setPreset(preset === p ? null : p)}
+                      className={`text-xs px-3 py-1.5 rounded border transition-colors ${preset === p ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}>
+                      {labels[p]}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <Label>Price (Rs.)</Label>
-              <Input type="number" placeholder="0" value={customCostPrice} onChange={(e) => setCustomCostPrice(e.target.value)} />
-            </div>
-            <div className="flex items-center gap-3">
-              <Label>Quantity</Label>
-              <Input type="number" className="w-24" value={customCostQty} onChange={(e) => setCustomCostQty(e.target.value)} min={1} />
-            </div>
+
+            {preset ? (
+              /* preset sub-form */
+              <div className="flex flex-col gap-3 rounded-md border p-3 bg-muted/30">
+                {preset === "fire" && (
+                  <>
+                    <p className="text-sm font-medium">Fire Suppression System — ₹{rFire.toLocaleString()}/module</p>
+                    <div className="flex items-center gap-3">
+                      <Label className="shrink-0">No. of modules</Label>
+                      <Input type="number" className="w-24" min={1} value={presetCount} onChange={(e) => setPresetCount(e.target.value)} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Rate & Price: ₹{((parseInt(presetCount) || 1) * rFire).toLocaleString()}</p>
+                  </>
+                )}
+                {preset === "rmd" && (
+                  <>
+                    <p className="text-sm font-medium">Remote Monitoring Device with 1 year Subscription</p>
+                    <div className="flex gap-2">
+                      {(["hvl", "efl"] as const).map((t) => (
+                        <button key={t} onClick={() => setRmdType(t)}
+                          className={`text-xs px-3 py-1 rounded border transition-colors ${rmdType === t ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}>
+                          {t.toUpperCase()} — ₹{(t === "hvl" ? rRmdHvl : rRmdEfl).toLocaleString()}/module
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Label className="shrink-0">No. of modules</Label>
+                      <Input type="number" className="w-24" min={1} value={presetCount} onChange={(e) => setPresetCount(e.target.value)} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Rate & Price: ₹{((parseInt(presetCount) || 1) * (rmdType === "hvl" ? rRmdHvl : rRmdEfl)).toLocaleString()}</p>
+                  </>
+                )}
+                {preset === "sub" && (
+                  <>
+                    <p className="text-sm font-medium">Subscription Charges — ₹{rSub.toLocaleString()}/year</p>
+                    <div className="flex items-center gap-3">
+                      <Label className="shrink-0">No. of years</Label>
+                      <Input type="number" className="w-24" min={1} value={presetCount} onChange={(e) => setPresetCount(e.target.value)} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Description: "{(parseInt(presetCount) || 1)} year subscription Charges" · Price: ₹{((parseInt(presetCount) || 1) * rSub).toLocaleString()}</p>
+                  </>
+                )}
+              </div>
+            ) : (
+              /* manual form */
+              <>
+                <div className="flex flex-col gap-1">
+                  <Label>Description</Label>
+                  <Input placeholder="e.g. Installation charges" value={customCostDesc} onChange={(e) => setCustomCostDesc(e.target.value)} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label>Price (Rs.)</Label>
+                  <Input type="number" placeholder="0" value={customCostPrice} onChange={(e) => setCustomCostPrice(e.target.value)} />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Label>Quantity</Label>
+                  <Input type="number" className="w-24" value={customCostQty} onChange={(e) => setCustomCostQty(e.target.value)} min={1} />
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddCustomCostOpen(false)}>Cancel</Button>
             <Button
               onClick={() => addCustomCostMut.mutate()}
-              disabled={addCustomCostMut.isPending || !customCostDesc.trim() || !customCostPrice}
+              disabled={addCustomCostMut.isPending || (!preset && (!customCostDesc.trim() || !customCostPrice))}
             >Add</Button>
           </DialogFooter>
         </DialogContent>
@@ -705,7 +856,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
 {/* Export Dialog */}
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
-        <DialogContent className="sm:max-w-xs">
+        <DialogContent className="sm:max-w-xs max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Export Quote</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-3 py-2">
             <Button onClick={() => handleExport("word")}>Word (.docx)</Button>

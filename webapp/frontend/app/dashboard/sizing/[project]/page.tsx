@@ -6,11 +6,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
 import SubmitApprovalDialog, { type ApprovalItem } from "@/components/SubmitApprovalDialog";
+import { PendingLinkDialog } from "@/components/pending-link-dialog";
 import { getPendingAction, clearPendingAction } from "@/lib/approval-action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Copy, Download, X } from "lucide-react";
+import { Copy, Download, Link2, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +36,11 @@ export default function SizingListPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<"all" | "selected">("all");
   const [exportFormat, setExportFormat] = useState<"excel" | "pdf">("excel");
+  const [pendingLinkOpen, setPendingLinkOpen] = useState(false);
+  const [pendingExportFn, setPendingExportFn] = useState<(() => void) | null>(null);
+  const [pendingExportData, setPendingExportData] = useState<Record<string, string>>({ export_type: "sizing_excel" });
+  const [directLinkOpen, setDirectLinkOpen] = useState(false);
+  const [directLinkData, setDirectLinkData] = useState<Record<string, string>>({ export_type: "sizing_excel" });
 const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
   const [pendingAction, setPendingActionState] = useState(() => getPendingAction());
@@ -84,6 +90,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       qc.invalidateQueries({ queryKey: qKey });
       const newSr = res.data.sr_no;
       if (newSr != null) {
+        qc.removeQueries({ queryKey: ["sizing", projectName, newSr] });
         router.push(`/dashboard/sizing/${encodeURIComponent(projectName)}/${newSr}`);
       }
     } catch (e: any) {
@@ -92,7 +99,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     }
   };
 
-  const handleExport = () => {
+  const doExport = () => {
     const sr = exportScope === "selected" ? selected : null;
     const srParam = sr != null ? `?sr_no=${sr}` : "";
     const endpoint = `/api/sizing/projects/${encodeURIComponent(projectName)}/export/${exportFormat}${srParam}`;
@@ -106,6 +113,42 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       window.URL.revokeObjectURL(url);
       setExportOpen(false);
     }).catch((e) => toast.error(apiErr(e, "Export failed")));
+  };
+
+  const handleExport = async () => {
+    setExportOpen(false);
+    let enriched: Record<string, string> = { export_type: `sizing_${exportFormat}` };
+    if (exportScope === "selected" && selected != null) {
+      try {
+        const row = await api.get(
+          `/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selected}`
+        ).then((r) => r.data);
+        enriched = {
+          export_type: `sizing_${exportFormat}`,
+          ups_make: String(row.ups_make ?? ""),
+          ups_model: String(row.ups_model ?? ""),
+          ups_kva: String(row.ups_rating_kva ?? ""),
+          actual_load_kva: String(row.actual_load_kva ?? ""),
+          load_kw: String(row.actual_load_kw ?? ""),
+          power_factor: String(row.power_factor ?? ""),
+          inverter_efficiency: String(row.inverter_efficiency ?? ""),
+          dc_voltage: String(row.nominal_dc_voltage ?? ""),
+          backup_min: String(row.backup_requirement_min ?? ""),
+          cell_chemistry: String(row.cell_chemistry ?? ""),
+          ageing_pct: String(row.ageing_percent ?? ""),
+          design_margin_pct: String(row.design_margin_percent ?? ""),
+          dod_margin_pct: String(row.dod_margin_percent ?? ""),
+          derating_pct: String(row.derating_factor_percent ?? ""),
+          capacity_ah: String(row.nearest_capacity_ah ?? ""),
+          ageing_type: String(row.ageing_type ?? ""),
+          backup_time_min: String(row.backup_time_min ?? ""),
+        };
+      } catch { /* fallback to sparse */ }
+    }
+    setPendingExportFn(() => doExport);
+    setPendingLinkOpen(true);
+    // store enriched for use in dialog — use a ref pattern via state
+    setPendingExportData(enriched);
   };
 
   return (
@@ -209,6 +252,45 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         <Button
           variant="outline"
           disabled={!selected}
+          onClick={async () => {
+            if (!selected) return;
+            const row = sizings.find((s) => s.sr_no === selected);
+            try {
+              const data = await api.get(
+                `/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selected}`
+              ).then((r) => r.data);
+              setDirectLinkData({
+                export_type: "sizing_excel",
+                ups_make: String(data.ups_make ?? ""),
+                ups_model: String(data.ups_model ?? ""),
+                ups_kva: String(data.ups_rating_kva ?? ""),
+                actual_load_kva: String(data.actual_load_kva ?? ""),
+                load_kw: String(data.actual_load_kw ?? ""),
+                power_factor: String(data.power_factor ?? ""),
+                inverter_efficiency: String(data.inverter_efficiency ?? ""),
+                dc_voltage: String(data.nominal_dc_voltage ?? ""),
+                backup_min: String(data.backup_requirement_min ?? ""),
+                cell_chemistry: String(data.cell_chemistry ?? ""),
+                ageing_pct: String(data.ageing_percent ?? ""),
+                design_margin_pct: String(data.design_margin_percent ?? ""),
+                dod_margin_pct: String(data.dod_margin_percent ?? ""),
+                derating_pct: String(data.derating_factor_percent ?? ""),
+                capacity_ah: String(data.nearest_capacity_ah ?? ""),
+                ageing_type: String(data.ageing_type ?? ""),
+                backup_time_min: String(data.backup_time_min ?? ""),
+              });
+              setDirectLinkOpen(true);
+            } catch { toast.error("Failed to load sizing data"); }
+          }}
+        >
+          <Link2 size={14} />
+          Link {sizings.find((s) => s.sr_no === selected)?.offered_battery_config
+            ? `"${sizings.find((s) => s.sr_no === selected)!.offered_battery_config}" `
+            : ""}to Pending
+        </Button>
+        <Button
+          variant="outline"
+          disabled={!selected}
           onClick={() => {
             const config = sizings.find((s) => s.sr_no === selected)?.offered_battery_config ?? "";
             router.push(`/dashboard/gad?q=${encodeURIComponent(config)}`);
@@ -244,7 +326,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
       {/* Export Dialog */}
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
-        <DialogContent className="sm:max-w-xs">
+        <DialogContent className="sm:max-w-xs max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Export Sizing</DialogTitle>
           </DialogHeader>
@@ -327,6 +409,23 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PendingLinkDialog
+        open={pendingLinkOpen}
+        exportLabel={`Sizing: ${projectName} (${exportFormat})`}
+        exportData={pendingExportData}
+        onClose={() => setPendingLinkOpen(false)}
+        onDone={() => { if (pendingExportFn) pendingExportFn(); setPendingExportFn(null); }}
+      />
+
+      <PendingLinkDialog
+        open={directLinkOpen}
+        exportLabel={`${sizings.find((s) => s.sr_no === selected)?.offered_battery_config || `Sr. ${selected}`} — ${projectName}`}
+        exportData={directLinkData}
+        actionLabel="Link to Pending"
+        onClose={() => setDirectLinkOpen(false)}
+        onDone={() => { setDirectLinkOpen(false); toast.success("Sizing linked to pending item"); }}
+      />
     </div>
   );
 }

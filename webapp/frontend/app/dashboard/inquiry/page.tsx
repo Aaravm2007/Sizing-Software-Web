@@ -1,12 +1,18 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useMemo, useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Trash2, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { RefreshCw, Trash2, Loader2, PackagePlus, FileUp } from "lucide-react";
+import { cn, fmtDate } from "@/lib/utils";
+import { FilterBar } from "@/components/filter-bar";
+import { FilterRow } from "@/components/filter-row";
+import { useTableFilter } from "@/lib/use-table-filter";
 
 // ── column definitions ────────────────────────────────────────────────────────
 
@@ -17,56 +23,74 @@ interface Col {
   label: string;
   width: number;
   type: "text" | "date" | "number" | "yn";
+  filterType?: "text" | "select" | "date";
+  filterOptions?: { value: string; label: string }[];
 }
 
 const COLS: Col[] = [
-  { key: "inquiry_code",      label: "Inquiry Code",       width: 120, type: "text"   },
-  { key: "inquiry_date",      label: "Inquiry Date",       width: 110, type: "date"   },
-  { key: "type",               label: "Type",               width: 160, type: "text"   },
-  { key: "sales_person",      label: "Sales Person",       width: 130, type: "text"   },
-  { key: "solution_provider", label: "Solution Provider",  width: 210, type: "text"   },
-  { key: "project_customer",    label: "Project / Customer",  width: 190, type: "text"   },
-  { key: "ups_make",            label: "UPS Make",            width: 100, type: "text"   },
-  { key: "ups_model",           label: "UPS Model",           width: 100, type: "text"   },
-  { key: "ups_kva",             label: "UPS (KVA)",           width: 80,  type: "text"   },
+  { key: "inquiry_code",      label: "Inquiry Code",       width: 120, type: "text",   filterType: "text" },
+  { key: "inquiry_date",      label: "Inquiry Date",       width: 110, type: "date",   filterType: "date" },
+  { key: "type",               label: "Type",               width: 160, type: "text",   filterType: "text" },
+  { key: "sales_person",      label: "Sales Person",       width: 130, type: "text",   filterType: "text" },
+  { key: "solution_provider", label: "Solution Provider",  width: 210, type: "text",   filterType: "text" },
+  { key: "project_customer",    label: "Project / Customer",  width: 190, type: "text",   filterType: "text" },
+  { key: "ups_make",            label: "UPS Make",            width: 100, type: "text",   filterType: "text" },
+  { key: "ups_model",           label: "UPS Model",           width: 100, type: "text",   filterType: "text" },
+  { key: "ups_kva",             label: "UPS (KVA)",           width: 80,  type: "text",   filterType: "text" },
   { key: "actual_load_kva",     label: "Load (KVA)",          width: 80,  type: "text"   },
   { key: "load_kw",             label: "Load (KW)",           width: 80,  type: "text"   },
   { key: "power_factor",        label: "Power Factor",        width: 85,  type: "text"   },
   { key: "inverter_efficiency", label: "Inv. Eff (%)",        width: 80,  type: "text"   },
   { key: "dc_voltage",          label: "DC Voltage",          width: 90,  type: "text"   },
   { key: "backup_min",          label: "Backup (min)",        width: 90,  type: "text"   },
-  { key: "cell_chemistry",      label: "Chemistry",           width: 80,  type: "text"   },
+  { key: "cell_chemistry",      label: "Chemistry",           width: 80,  type: "text",   filterType: "text" },
   { key: "ageing_pct",          label: "Ageing (%)",          width: 75,  type: "text"   },
   { key: "design_margin_pct",   label: "Design Margin (%)",   width: 110, type: "text"   },
   { key: "dod_margin_pct",      label: "DOD Margin (%)",      width: 100, type: "text"   },
   { key: "derating_pct",        label: "Derating (%)",        width: 85,  type: "text"   },
   { key: "capacity_ah",         label: "Capacity (Ah)",       width: 100, type: "text"   },
-  { key: "centre_tap",        label: "Centre Tap",         width: 90,  type: "text"   },
-  { key: "cell_type",         label: "Cell Type",          width: 110, type: "text"   },
-  { key: "ageing_type",       label: "BOL/EOL",            width: 70,  type: "text"   },
+  { key: "centre_tap",  label: "Centre Tap", width: 90,  type: "text", filterType: "select", filterOptions: [{ value: "Centre Tap", label: "Centre Tap" }, { value: "Non Centre Tap", label: "Non Centre Tap" }] },
+  { key: "cell_type",   label: "Cell Type",  width: 110, type: "text", filterType: "select", filterOptions: [{ value: "Prismatic", label: "Prismatic" }, { value: "Cylindrical", label: "Cylindrical" }] },
+  { key: "ageing_type", label: "BOL/EOL",    width: 70,  type: "text", filterType: "select", filterOptions: [{ value: "BOL", label: "BOL" }, { value: "EOL", label: "EOL" }] },
   { key: "backup_time_min",   label: "Backup Time (min)",  width: 120, type: "text"   },
-  { key: "part_code",         label: "Part Code",          width: 200, type: "text"   },
+  { key: "part_code",         label: "Part Code",          width: 200, type: "text",   filterType: "text" },
   { key: "qty_system",        label: "Qty (System)",       width: 85,  type: "number" },
   { key: "rate_system",       label: "Rate (System ₹)",    width: 120, type: "number" },
   { key: "price_system",      label: "Price (System ₹)",   width: 125, type: "number" },
-  { key: "rack_dim",          label: "Rack Dim",           width: 120, type: "text"   },
-  { key: "qty",               label: "Qty (Rack)",         width: 75,  type: "number" },
-  { key: "per_rack_price",    label: "Rate (Rack ₹)",      width: 110, type: "number" },
-  { key: "price",             label: "Price (Rack ₹)",     width: 120, type: "number" },
-  { key: "custom_cost_desc",  label: "Custom Cost Desc",   width: 160, type: "text"   },
-  { key: "custom_cost_price", label: "Custom Cost (₹)",    width: 120, type: "number" },
+  { key: "rack1_dim",         label: "Rack 1 Dim",         width: 140, type: "text"   },
+  { key: "rack1_qty",         label: "Rack 1 Qty",         width: 75,  type: "number" },
+  { key: "rack1_rate",        label: "Rack 1 Rate ₹",      width: 110, type: "number" },
+  { key: "rack1_price",       label: "Rack 1 Price ₹",     width: 115, type: "number" },
+  { key: "rack2_dim",         label: "Rack 2 Dim",         width: 140, type: "text"   },
+  { key: "rack2_qty",         label: "Rack 2 Qty",         width: 75,  type: "number" },
+  { key: "rack2_rate",        label: "Rack 2 Rate ₹",      width: 110, type: "number" },
+  { key: "rack2_price",       label: "Rack 2 Price ₹",     width: 115, type: "number" },
+  { key: "cc1_desc",          label: "CC1 Desc",           width: 150, type: "text"   },
+  { key: "cc1_price",         label: "CC1 Price ₹",        width: 110, type: "number" },
+  { key: "cc2_desc",          label: "CC2 Desc",           width: 150, type: "text"   },
+  { key: "cc2_price",         label: "CC2 Price ₹",        width: 110, type: "number" },
+  { key: "cc3_desc",          label: "CC3 Desc",           width: 150, type: "text"   },
+  { key: "cc3_price",         label: "CC3 Price ₹",        width: 110, type: "number" },
+  { key: "cc4_desc",          label: "CC4 Desc",           width: 150, type: "text"   },
+  { key: "cc4_price",         label: "CC4 Price ₹",        width: 110, type: "number" },
+  { key: "cc5_desc",          label: "CC5 Desc",           width: 150, type: "text"   },
+  { key: "cc5_price",         label: "CC5 Price ₹",        width: 110, type: "number" },
   { key: "datasheet",         label: "Datasheet",          width: 90,  type: "yn"     },
   { key: "sizing_sheet",      label: "Sizing Sheet",       width: 95,  type: "yn"     },
   { key: "gad",               label: "GAD",                width: 60,  type: "yn"     },
   { key: "battery_compliance",label: "Bat. Compliance",    width: 115, type: "yn"     },
-  { key: "warranty",          label: "Warranty",           width: 100, type: "text"   },
+  { key: "warranty",          label: "Warranty (yrs)",     width: 100, type: "text"   },
+  { key: "dollar_rate",       label: "Dollar Rate",        width: 100, type: "text"   },
   { key: "remarks",           label: "Remarks",            width: 210, type: "text"   },
-  { key: "handled_by",        label: "Handled By",         width: 110, type: "text"   },
-  { key: "submission_date",   label: "Submission Date",    width: 110, type: "date"   },
-  { key: "submitted_to",      label: "Submitted To",       width: 160, type: "text"   },
+  { key: "handled_by",        label: "Handled By",         width: 110, type: "text",   filterType: "text" },
+  { key: "submission_date",   label: "Submission Date",    width: 110, type: "date",   filterType: "date" },
+  { key: "submitted_to",      label: "Submitted To",       width: 160, type: "text",   filterType: "text" },
+  { key: "submitted_by",      label: "Submitted By",       width: 130, type: "text",   filterType: "text" },
 ];
 
 const TOTAL_W = COLS.reduce((s, c) => s + c.width, 0) + 50 + 40; // +sr_no col + delete col
+
+const INQUIRY_SELECT_KEYS = new Set(["cell_type", "centre_tap", "ageing_type"]);
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -78,7 +102,8 @@ function fmtPrice(v: string) {
 
 function displayVal(col: Col, val: string) {
   if (col.type === "yn") return val === "YES" ? "✓" : "✗";
-  if ((col.key === "price" || col.key === "per_rack_price") && val) return fmtPrice(val);
+  if (col.type === "date" && val) return fmtDate(val);
+  if (/^(price|per_rack_price|rack[12]_(?:rate|price)|cc[1-5]_price|price_system|rate_system)$/.test(col.key) && val) return fmtPrice(val);
   return val || "";
 }
 
@@ -86,24 +111,29 @@ function displayVal(col: Col, val: string) {
 
 export default function InquiryPage() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"global" | "mine">("global");
+  const activeKey = ["inquiry", "global"];
 
-  const globalKey = ["inquiry", "global"];
-  const mineKey   = ["inquiry", "mine"];
-  const activeKey = tab === "global" ? globalKey : mineKey;
-
-  const { data: globalEntries = [], isLoading: globalLoading } = useQuery({
-    queryKey: globalKey,
+  const { data: entries = [], isLoading } = useQuery({
+    queryKey: activeKey,
     queryFn: () => api.get("/api/inquiry").then(r => r.data),
   });
 
-  const { data: mineEntries = [], isLoading: mineLoading } = useQuery({
-    queryKey: mineKey,
-    queryFn: () => api.get("/api/inquiry/mine").then(r => r.data),
-  });
+  const INQUIRY_SEARCH_KEYS = useMemo(() => [
+    "inquiry_code", "solution_provider", "project_customer", "part_code",
+    "sales_person", "handled_by", "submitted_to", "submitted_by", "ups_kva",
+    "type", "cell_type", "cell_chemistry",
+  ] as const, []);
 
-  const entries  = tab === "global" ? globalEntries : mineEntries;
-  const isLoading = tab === "global" ? globalLoading : mineLoading;
+  const { filtered: filteredEntries, values: filterValues, globalSearch, setField, clear, activeCount } =
+    useTableFilter(entries, INQUIRY_SEARCH_KEYS as any, INQUIRY_SELECT_KEYS);
+
+  const sortedEntries = useMemo(() =>
+    [...filteredEntries].sort((a: any, b: any) =>
+      String(a.inquiry_code ?? "").toLowerCase().localeCompare(
+        String(b.inquiry_code ?? "").toLowerCase()
+      )
+    ),
+  [filteredEntries]);
 
   const { data: me } = useQuery({
     queryKey: ["me"],
@@ -136,15 +166,114 @@ export default function InquiryPage() {
   const patchMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Record<string, string> }) =>
       api.patch(`/api/inquiry/${id}`, patch),
+    onSuccess: (_, { id, patch }) => {
+      qc.setQueryData(activeKey, (old: any[]) =>
+        old ? old.map((e: any) => e._id === id ? { ...e, ...patch } : e) : old
+      );
+    },
     onError: (e: any) => toast.error(apiErr(e, "Save failed")),
   });
+
+  // ── create PO from inquiry row ─────────────────────────────────────────────
+  const [createPORow, setCreatePORow] = useState<any | null>(null);
+  const [poDocFile, setPoDocFile]     = useState<File | null>(null);
+  const [poInqForm, setPoInqForm] = useState({
+    inquiry_code: "", customer_name: "", project_name: "", solution: "",
+    inquiry_qty: "", po_qty: "", po_no: "", po_date: "", unit_price: "",
+    cell_used: "", cells_per_rack: "", expected_completion_date: "", remarks: "",
+  });
+  const [poChips, setPoChips] = useState<{ key: string; label: string; price: number; active: boolean }[]>([]);
+
+  const createPOMut = useMutation({
+    mutationFn: (data: typeof poInqForm) => api.post("/api/po", data).then(r => r.data),
+    onSuccess: async (res: { id: number }) => {
+      if (poDocFile) {
+        try {
+          const fd = new FormData();
+          fd.append("file", poDocFile);
+          await api.post(`/api/po/${res.id}/upload`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        } catch { toast.error("PO created but document upload failed"); }
+      }
+      toast.success("PO created");
+      setCreatePORow(null);
+      setPoDocFile(null);
+    },
+    onError: (e: any) => toast.error(apiErr(e, "Failed to create PO")),
+  });
+
+  const buildChips = (row: any) => {
+    const chips: { key: string; label: string; price: number; active: boolean }[] = [];
+    const qty = parseFloat(row.qty_system) || 1;
+    const push = (key: string, label: string, price: number) => {
+      if (price) chips.push({ key, label, price, active: true });
+    };
+    push("system", "System",           parseFloat(row.rate_system) || 0);
+    push("rack1",  "Rack 1 (Modular)", (parseFloat(row.rack1_price) || 0) / qty);
+    push("rack2",  "Rack 2 (Modular)", (parseFloat(row.rack2_price) || 0) / qty);
+    for (let i = 1; i <= 5; i++) {
+      push(`cc${i}`, row[`cc${i}_desc`] || `CC${i}`, parseFloat(row[`cc${i}_price`]) || 0);
+    }
+    return chips;
+  };
+
+  const chipsTotal = (chips: typeof poChips) =>
+    chips.filter(c => c.active).reduce((s, c) => s + c.price, 0);
+
+  const buildRemarks = (chips: typeof poChips) => {
+    const inactive = chips.filter(c => !c.active);
+    if (inactive.length === 0) return "All quoted prices included";
+    return inactive.map(c => `${c.label} (₹${c.price.toLocaleString("en-IN")})`).join(", ") + " quoted but not included";
+  };
+
+  const openCreatePO = (row: any) => {
+    const chips = buildChips(row);
+    setPoChips(chips);
+    const total = chipsTotal(chips);
+    setPoInqForm({
+      inquiry_code:             row.inquiry_code      || "",
+      customer_name:            row.solution_provider || "",
+      project_name:             row.project_customer  || "",
+      solution:                 row.part_code         || "",
+      inquiry_qty:              String(row.qty_system ?? ""),
+      po_qty:                   String(row.qty_system ?? ""),
+      po_no: "", po_date: "",
+      unit_price:               total ? String(total) : "",
+      cell_used:                "",
+      cells_per_rack:           "",
+      expected_completion_date: "",
+      remarks:                  chips.length ? buildRemarks(chips) : "",
+    });
+    setCreatePORow(row);
+  };
+
+  const togglePoChip = (key: string) => {
+    setPoChips(prev => {
+      const next = prev.map(c => c.key === key ? { ...c, active: !c.active } : c);
+      setPoInqForm(f => ({
+        ...f,
+        unit_price: String(chipsTotal(next)) || "",
+        remarks: buildRemarks(next),
+      }));
+      return next;
+    });
+  };
 
   // ── commit edit ────────────────────────────────────────────────────────────
   const commitEdit = useCallback(() => {
     if (!editing) return;
-    patchMut.mutate({ id: editing.id, patch: { [editing.key]: editVal } });
+    const patch: Record<string, string> = { [editing.key]: editVal };
+    if (editing.key === "warranty") {
+      const row = entries.find((e: any) => e._id === editing.id);
+      if (row) {
+        const qfmt: string = row.quote_format || "";
+        if (qfmt.includes("Extended_Warranty") && row.base_partcode) {
+          patch.part_code = `${row.base_partcode}-${editVal}W`;
+        }
+      }
+    }
+    patchMut.mutate({ id: editing.id, patch });
     setEditing(null);
-  }, [editing, editVal]);
+  }, [editing, editVal, entries]);
 
   // ── start editing a cell ───────────────────────────────────────────────────
   const startEdit = (id: string, key: string, currentVal: string) => {
@@ -176,30 +305,25 @@ export default function InquiryPage() {
       {/* ── toolbar ── */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b bg-background shrink-0">
         <h1 className="text-lg font-bold">UPS Inquiry Sheet</h1>
-        {/* tabs */}
-        <div className="flex gap-1 ml-2">
-          {(["global", "mine"] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => { setEditing(null); setTab(t); }}
-              className={cn(
-                "px-3 py-1 rounded text-xs font-medium transition-colors",
-                tab === t
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
-              )}
-            >
-              {t === "global" ? "Global" : "My Entries"}
-            </button>
-          ))}
-        </div>
-        <span className="text-xs text-muted-foreground">{entries.length} entries</span>
+        <span className="text-xs text-muted-foreground">
+          {filteredEntries.length !== entries.length ? `${filteredEntries.length} / ${entries.length}` : entries.length} entries
+        </span>
         <div className="flex-1" />
         <Button size="sm" variant="outline" className="gap-1.5" onClick={() => qc.invalidateQueries({ queryKey: activeKey })}>
           <RefreshCw className="h-3.5 w-3.5" />
           Reload
         </Button>
       </div>
+
+      {/* ── filter bar ── */}
+      <FilterBar
+        values={filterValues}
+        onField={setField}
+        onClear={clear}
+        globalSearch={globalSearch}
+        globalPlaceholder="Search inquiry code, customer, part code…"
+        activeCount={activeCount}
+      />
 
       {/* ── table ── */}
       <div className="flex-1 overflow-auto">
@@ -216,9 +340,19 @@ export default function InquiryPage() {
                   {col.label}
                 </th>
               ))}
-              {/* delete col — experts only, global tab only */}
-              {isExpert && tab === "global" && <th className="border border-muted px-1 py-2" style={{ width: 40, minWidth: 40 }} />}
+              <th className="border border-muted px-2 py-2 text-xs font-semibold whitespace-nowrap" style={{ width: 90, minWidth: 90 }}>Create PO</th>
+              {isExpert && <th className="border border-muted px-1 py-2" style={{ width: 40, minWidth: 40 }} />}
             </tr>
+            <FilterRow
+              cols={COLS}
+              values={filterValues}
+              onField={setField}
+              prefixCells={[{ width: 50, sticky: true, stickyBg: "bg-background" }]}
+              suffixCells={[
+                { width: 90 },
+                ...(isExpert ? [{ width: 40 }] : []),
+              ]}
+            />
           </thead>
           <tbody>
             {entries.length === 0 && (
@@ -229,7 +363,7 @@ export default function InquiryPage() {
                 </td>
               </tr>
             )}
-            {entries.map((row: any) => (
+            {sortedEntries.map((row: any) => (
               <tr key={row._id} className="hover:bg-muted/30 group">
                 {/* Sr No — sticky */}
                 <td className="sticky left-0 z-10 bg-background group-hover:bg-muted/30 border border-muted px-2 py-1 font-mono text-muted-foreground select-none">
@@ -239,7 +373,7 @@ export default function InquiryPage() {
                 {COLS.map(col => {
                   const val = String(row[col.key] ?? "");
                   const isEditing = editing?.id === row._id && editing?.key === col.key;
-                  const canEdit = isExpert && tab === "global";
+                  const canEdit = isExpert;
 
                   if (col.type === "yn") {
                     return (
@@ -293,8 +427,20 @@ export default function InquiryPage() {
                   );
                 })}
 
-                {/* delete button — experts only, global tab only */}
-                {isExpert && tab === "global" && (
+                {/* create PO button */}
+                <td className="border border-muted px-1 py-1 text-center">
+                  <button
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-primary border border-primary/40 hover:bg-primary/10"
+                    title="Create PO"
+                    onClick={() => openCreatePO(row)}
+                  >
+                    <PackagePlus className="h-3.5 w-3.5" />
+                    PO
+                  </button>
+                </td>
+
+                {/* delete button — experts only */}
+                {isExpert && (
                   <td className="border border-muted px-1 py-1 text-center">
                     {confirmDelete === String(row.sr_no) ? (
                       <div className="flex items-center gap-1 justify-center">
@@ -309,7 +455,7 @@ export default function InquiryPage() {
                       </div>
                     ) : (
                       <button
-                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-opacity"
+                        className="p-0.5 rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
                         onClick={() => setConfirmDelete(String(row.sr_no))}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -322,6 +468,102 @@ export default function InquiryPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Create PO from inquiry dialog */}
+      <Dialog open={!!createPORow} onOpenChange={o => { if (!o) setCreatePORow(null); }}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create PO — {createPORow?.inquiry_code}</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            {([
+              { key: "inquiry_code",  label: "Inquiry Code", readonly: true },
+              { key: "customer_name", label: "Customer Name" },
+              { key: "project_name",  label: "Project / Customer", span: true },
+              { key: "solution",      label: "Solution (Part Code)", span: true },
+              { key: "inquiry_qty",   label: "Inquiry Qty", readonly: true },
+              { key: "po_qty",        label: "PO Qty" },
+              { key: "po_no",         label: "PO No." },
+              { key: "po_date",       label: "PO Date", type: "date" },
+              { key: "unit_price",    label: "Unit Price (GST Extra)", readonly: true },
+              { key: "cell_used",               label: "Cell Used" },
+              { key: "cells_per_rack",          label: "Cells per Pack" },
+              { key: "expected_completion_date", label: "Expected Completion Date", type: "date" },
+              { key: "remarks",                 label: "Remarks", span: true, textarea: true },
+            ] as { key: keyof typeof poInqForm; label: string; type?: string; span?: boolean; textarea?: boolean; readonly?: boolean }[]).map(f => (
+              <div key={f.key} className={cn("flex flex-col gap-1", f.span && "col-span-2")}>
+                <Label className="text-xs">{f.label}</Label>
+                {f.key === "unit_price" && poChips.length > 0 && (
+                  <div className="flex flex-col gap-2 mb-1">
+                    <div className="flex flex-wrap gap-1.5">
+                      {poChips.map(chip => (
+                        <button
+                          key={chip.key}
+                          type="button"
+                          onClick={() => togglePoChip(chip.key)}
+                          className={cn(
+                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border transition-colors",
+                            chip.active
+                              ? "bg-primary/10 border-primary/40 text-primary"
+                              : "bg-muted border-muted text-muted-foreground line-through"
+                          )}
+                        >
+                          {chip.label}: ₹{chip.price.toLocaleString("en-IN")}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {f.readonly ? (
+                  <div className="h-8 flex items-center px-3 rounded-md border bg-muted text-xs text-muted-foreground select-all">
+                    {poInqForm[f.key]
+                      ? (f.key === "unit_price" ? `₹${parseFloat(poInqForm[f.key]).toLocaleString("en-IN")}` : poInqForm[f.key])
+                      : "—"}
+                  </div>
+                ) : f.textarea ? (
+                  <textarea
+                    rows={2}
+                    value={poInqForm[f.key]}
+                    onChange={e => setPoInqForm(p => ({ ...p, [f.key]: e.target.value }))}
+                    className="rounded-md border px-3 py-1.5 text-xs bg-background resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                ) : (
+                  <Input
+                    type={f.type ?? "text"}
+                    value={poInqForm[f.key]}
+                    onChange={e => setPoInqForm(p => ({ ...p, [f.key]: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+          {/* PO Document attach */}
+          <div className="flex flex-col gap-1 border-t pt-3">
+            <Label className="text-xs flex items-center gap-1"><FileUp size={12} /> Attach PO Document <span className="text-muted-foreground">(optional, any format)</span></Label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="file" className="hidden" onChange={e => setPoDocFile(e.target.files?.[0] ?? null)} />
+              <span className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs transition-colors",
+                poDocFile ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-muted text-muted-foreground"
+              )}>
+                <FileUp size={12} />
+                {poDocFile ? poDocFile.name : "Choose file…"}
+              </span>
+              {poDocFile && (
+                <button type="button" className="text-xs text-muted-foreground hover:text-destructive" onClick={() => setPoDocFile(null)}>Remove</button>
+              )}
+            </label>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => { setCreatePORow(null); setPoDocFile(null); }}>Cancel</Button>
+            <Button onClick={() => createPOMut.mutate(poInqForm)} disabled={createPOMut.isPending}>
+              {createPOMut.isPending ? "Creating…" : "Create PO"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
