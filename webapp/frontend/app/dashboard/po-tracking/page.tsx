@@ -103,7 +103,7 @@ const COLS: { key: string; label: string; w: number; filterType?: "text" | "sele
   { key: "days_late",                label: "Days Left",                w: 90  },
 ];
 
-const PO_FIELDS: { key: keyof typeof EMPTY_PO; label: string; type?: string; span?: boolean; readonly?: boolean }[] = [
+const PO_FIELDS: { key: keyof typeof EMPTY_PO; label: string; type?: string; span?: boolean; readonly?: boolean; currency?: boolean }[] = [
   { key: "inquiry_code",         label: "Inquiry Code", readonly: true },
   { key: "customer_name",        label: "Customer Name",          span: true },
   { key: "project_name",         label: "Project / End Customer", span: true },
@@ -119,7 +119,7 @@ const PO_FIELDS: { key: keyof typeof EMPTY_PO; label: string; type?: string; spa
   { key: "remarks",                  label: "Remarks", span: true },
 ];
 
-const ALL_EDIT_FIELDS: { key: keyof typeof EMPTY_EDIT; label: string; type?: string; span?: boolean }[] = [
+const ALL_EDIT_FIELDS: { key: keyof typeof EMPTY_EDIT; label: string; type?: string; span?: boolean; readonly?: boolean; currency?: boolean }[] = [
   { key: "inquiry_code",         label: "Inquiry Code", readonly: true },
   { key: "customer_name",        label: "Customer Name",          span: true },
   { key: "project_name",         label: "Project / End Customer", span: true },
