@@ -165,8 +165,8 @@ def _generate_docx(quote_code: str, db_path: str = None) -> str:
         "{{DATE}}": str(date),
         "{{SOLUTION_PROVIDER}}": str(provider),
         "{{CUSTOMER_NAME}}": str(customer),
-        "{DOLLAR_RATE}": dollar_rate,
-        "{EXTENDED_WARRANTY}": extended_warranty,
+        "{{DOLLAR_RATE}}": dollar_rate,
+        "{{EXTENDED_WARRANTY}}": extended_warranty,
     }
 
     def _replace_para(para):
