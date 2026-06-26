@@ -453,12 +453,12 @@ export default function PendingPage() {
 
     return [...filteredRows].sort((a, b) => {
       // 1. Completed status is always the primary group.
-      //    Default: completed first. Completed ↓ flips to pending first.
+      //    Default: pending first. Completed ↑ flips to completed first.
       const ca = a.status === "completed" ? 1 : 0;
       const cb = b.status === "completed" ? 1 : 0;
       if (ca !== cb) {
-        const pendingFirst = sort?.key === "completed" && sort.dir === "desc";
-        return pendingFirst ? ca - cb : cb - ca;
+        const completedFirst = sort?.key === "completed" && sort.dir === "asc";
+        return completedFirst ? cb - ca : ca - cb;
       }
 
       // 2. Secondary: selected sort (skip if it's the Completed column — handled above).
