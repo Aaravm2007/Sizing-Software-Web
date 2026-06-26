@@ -39,6 +39,7 @@ export default function SizingListPage() {
   const [pendingLinkOpen, setPendingLinkOpen] = useState(false);
   const [pendingExportFn, setPendingExportFn] = useState<(() => void) | null>(null);
   const [pendingExportData, setPendingExportData] = useState<Record<string, string>>({ export_type: "sizing_excel" });
+  const [pendingExportDataList, setPendingExportDataList] = useState<Record<string, string>[] | undefined>(undefined);
   const [directLinkOpen, setDirectLinkOpen] = useState(false);
   const [directLinkData, setDirectLinkData] = useState<Record<string, string>>({ export_type: "sizing_excel" });
 const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
@@ -115,40 +116,58 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     }).catch((e) => toast.error(apiErr(e, "Export failed")));
   };
 
+  const _rowToExportData = (row: any, fmt: string): Record<string, string> => ({
+    export_type: `sizing_${fmt}`,
+    ups_make: String(row.ups_make ?? ""),
+    ups_model: String(row.ups_model ?? ""),
+    ups_kva: String(row.ups_rating_kva ?? ""),
+    actual_load_kva: String(row.actual_load_kva ?? ""),
+    load_kw: String(row.actual_load_kw ?? ""),
+    power_factor: String(row.power_factor ?? ""),
+    inverter_efficiency: String(row.inverter_efficiency ?? ""),
+    dc_voltage: String(row.nominal_dc_voltage ?? ""),
+    backup_min: String(row.backup_requirement_min ?? ""),
+    cell_chemistry: String(row.cell_chemistry ?? ""),
+    ageing_pct: String(row.ageing_percent ?? ""),
+    design_margin_pct: String(row.design_margin_percent ?? ""),
+    dod_margin_pct: String(row.dod_margin_percent ?? ""),
+    derating_pct: String(row.derating_factor_percent ?? ""),
+    capacity_ah: String(row.nearest_capacity_ah ?? ""),
+    ageing_type: String(row.ageing_type ?? ""),
+    backup_time_min: String(row.backup_time_min ?? ""),
+  });
+
   const handleExport = async () => {
     setExportOpen(false);
-    let enriched: Record<string, string> = { export_type: `sizing_${exportFormat}` };
     if (exportScope === "selected" && selected != null) {
       try {
         const row = await api.get(
           `/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selected}`
         ).then((r) => r.data);
-        enriched = {
-          export_type: `sizing_${exportFormat}`,
-          ups_make: String(row.ups_make ?? ""),
-          ups_model: String(row.ups_model ?? ""),
-          ups_kva: String(row.ups_rating_kva ?? ""),
-          actual_load_kva: String(row.actual_load_kva ?? ""),
-          load_kw: String(row.actual_load_kw ?? ""),
-          power_factor: String(row.power_factor ?? ""),
-          inverter_efficiency: String(row.inverter_efficiency ?? ""),
-          dc_voltage: String(row.nominal_dc_voltage ?? ""),
-          backup_min: String(row.backup_requirement_min ?? ""),
-          cell_chemistry: String(row.cell_chemistry ?? ""),
-          ageing_pct: String(row.ageing_percent ?? ""),
-          design_margin_pct: String(row.design_margin_percent ?? ""),
-          dod_margin_pct: String(row.dod_margin_percent ?? ""),
-          derating_pct: String(row.derating_factor_percent ?? ""),
-          capacity_ah: String(row.nearest_capacity_ah ?? ""),
-          ageing_type: String(row.ageing_type ?? ""),
-          backup_time_min: String(row.backup_time_min ?? ""),
-        };
-      } catch { /* fallback to sparse */ }
+        setPendingExportData(_rowToExportData(row, exportFormat));
+      } catch {
+        setPendingExportData({ export_type: `sizing_${exportFormat}` });
+      }
+      setPendingExportDataList(undefined);
+    } else {
+      // Export All — fetch every sizing and build one entry per sizing
+      try {
+        const rows = await Promise.all(
+          sizings.map((s) =>
+            api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`)
+              .then((r) => r.data).catch(() => null)
+          )
+        );
+        const list = rows.filter(Boolean).map((r) => _rowToExportData(r, exportFormat));
+        setPendingExportDataList(list.length > 0 ? list : undefined);
+        setPendingExportData(list[0] ?? { export_type: `sizing_${exportFormat}` });
+      } catch {
+        setPendingExportData({ export_type: `sizing_${exportFormat}` });
+        setPendingExportDataList(undefined);
+      }
     }
     setPendingExportFn(() => doExport);
     setPendingLinkOpen(true);
-    // store enriched for use in dialog — use a ref pattern via state
-    setPendingExportData(enriched);
   };
 
   return (
@@ -414,8 +433,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         open={pendingLinkOpen}
         exportLabel={`Sizing: ${projectName} (${exportFormat})`}
         exportData={pendingExportData}
-        onClose={() => setPendingLinkOpen(false)}
-        onDone={() => { if (pendingExportFn) pendingExportFn(); setPendingExportFn(null); }}
+        exportDataList={pendingExportDataList}
+        onClose={() => { setPendingLinkOpen(false); setPendingExportDataList(undefined); }}
+        onDone={() => { if (pendingExportFn) pendingExportFn(); setPendingExportFn(null); setPendingExportDataList(undefined); }}
       />
 
       <PendingLinkDialog

@@ -83,6 +83,7 @@ interface Props {
   open: boolean;
   exportLabel: string;
   exportData: PendingExportData;
+  exportDataList?: PendingExportData[]; // when set, logs one entry per item (bulk)
   onClose: () => void;
   onDone: () => void;
   actionLabel?: string;
@@ -98,7 +99,7 @@ const PRIORITY_LABELS: Record<string, string> = {
   urgent: "Urgent", semi_urgent: "Semi Urgent", relaxed: "Relaxed",
 };
 
-export function PendingLinkDialog({ open, exportLabel, exportData, onClose, onDone, actionLabel = "Link & Export" }: Props) {
+export function PendingLinkDialog({ open, exportLabel, exportData, exportDataList, onClose, onDone, actionLabel = "Link & Export" }: Props) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<PendingRow | null>(null);
@@ -129,6 +130,12 @@ export function PendingLinkDialog({ open, exportLabel, exportData, onClose, onDo
           export_type: exportData.export_type,
         });
       }
+      if (exportDataList && exportDataList.length > 0) {
+        return api.post("/api/pending/my-exports/bulk", {
+          pending_code,
+          exports: exportDataList,
+        });
+      }
       return api.post("/api/pending/my-exports", {
         pending_code,
         ...exportData,
@@ -147,8 +154,6 @@ export function PendingLinkDialog({ open, exportLabel, exportData, onClose, onDo
     onClose();
   };
 
-  const handleSkip = () => { handleClose(); onDone(); };
-
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
       <DialogContent className="sm:max-w-sm">
@@ -158,7 +163,7 @@ export function PendingLinkDialog({ open, exportLabel, exportData, onClose, onDo
 
         <p className="text-xs text-muted-foreground -mt-1">
           Exporting <span className="font-medium text-foreground">{exportLabel}</span>.
-          Select a pending item to record this export against it, or skip.
+          Select a pending item to record this export against it.
         </p>
 
         <Input
@@ -208,9 +213,6 @@ export function PendingLinkDialog({ open, exportLabel, exportData, onClose, onDo
         </div>
 
         <DialogFooter className="gap-2 flex-row">
-          <Button variant="ghost" className="flex-1" onClick={handleSkip}>
-            Skip
-          </Button>
           <Button
             className="flex-1"
             disabled={!selected || linkMut.isPending}

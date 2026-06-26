@@ -7,7 +7,7 @@ from typing import Literal
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from auth import get_current_user, get_expert_user
 from pending_db import push_row, list_rows, list_mine, update_row, delete_row, init_db, suggest_next_inquiry_code
-from pending_user_db import init_item_table, log_export, list_exports, list_all_tables, export_summary_all, update_export_sol_no, update_export_parent, clear_export_link
+from pending_user_db import init_item_table, log_export, log_export_bulk, list_exports, list_all_tables, export_summary_all, update_export_sol_no, update_export_parent, clear_export_link, delete_export
 from pending_full_db import init_db as init_full_db, log_export as full_log_export, list_by_code as full_list_by_code
 from user_db import get_user_pending_db, get_user_inquiry_db, get_user_temp_db
 
@@ -243,6 +243,17 @@ def add_export(body: ExportEntry, user=Depends(get_current_user)):
     return {"id": row_id}
 
 
+class BulkExportEntry(BaseModel):
+    pending_code: str
+    exports: list[dict]
+
+@router.post("/my-exports/bulk", status_code=201)
+def add_exports_bulk(body: BulkExportEntry, user=Depends(get_current_user)):
+    db = get_user_pending_db(user["username"])
+    ids = log_export_bulk(body.pending_code, body.exports, db)
+    return {"ids": ids}
+
+
 @router.get("/my-exports/{pending_code}")
 def get_exports(pending_code: str, user=Depends(get_current_user)):
     db = get_user_pending_db(user["username"])
@@ -449,3 +460,14 @@ def unlink_export(body: UnlinkBody, user=Depends(get_current_user)):
     db_path = get_user_pending_db(user["username"])
     clear_export_link(body.pending_code, body.export_id, db_path)
     return {"detail": "unlinked"}
+
+
+class DeleteExportBody(BaseModel):
+    pending_code: str
+    export_id: int
+
+@router.delete("/my-exports")
+def delete_export_entry(body: DeleteExportBody, user=Depends(get_current_user)):
+    db_path = get_user_pending_db(user["username"])
+    delete_export(body.pending_code, body.export_id, db_path)
+    return {"detail": "deleted"}

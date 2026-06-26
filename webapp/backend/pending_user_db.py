@@ -164,6 +164,23 @@ def log_export(pending_code: str, data: dict, db_path: str) -> int:
         return cur.lastrowid
 
 
+def log_export_bulk(pending_code: str, entries: list[dict], db_path: str) -> list[int]:
+    init_item_table(pending_code, db_path)
+    tbl = _tbl(pending_code)
+    ts = int(time.time() * 1000)
+    ids = []
+    with _conn(db_path) as c:
+        for data in entries:
+            allowed = [k for k in data if k in _ITEM_COLS and k not in ("id", "exported_at")]
+            allowed_with_ts = allowed + ["exported_at"]
+            values = [data[k] for k in allowed] + [ts]
+            cols_sql = ", ".join(f'"{col}"' for col in allowed_with_ts)
+            ph = ", ".join("?" * len(allowed_with_ts))
+            cur = c.execute(f'INSERT INTO "{tbl}" ({cols_sql}) VALUES ({ph})', values)
+            ids.append(cur.lastrowid)
+    return ids
+
+
 def list_exports(pending_code: str, db_path: str) -> list:
     init_item_table(pending_code, db_path)
     tbl = _tbl(pending_code)
@@ -187,6 +204,12 @@ def clear_export_link(pending_code: str, export_id: int, db_path: str):
     tbl = _tbl(pending_code)
     with _conn(db_path) as c:
         c.execute(f'UPDATE "{tbl}" SET sol_no = NULL, parent_id = NULL WHERE id = ?', (export_id,))
+
+
+def delete_export(pending_code: str, export_id: int, db_path: str):
+    tbl = _tbl(pending_code)
+    with _conn(db_path) as c:
+        c.execute(f'DELETE FROM "{tbl}" WHERE id = ?', (export_id,))
 
 
 def list_all_tables(db_path: str) -> list[str]:

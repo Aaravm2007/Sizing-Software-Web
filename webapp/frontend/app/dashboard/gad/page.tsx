@@ -23,6 +23,7 @@ function FileBrowserInner({ folderKey, title }: { folderKey: string; title: stri
   const [selected, setSelected] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [pendingFile, setPendingFile] = useState<string | null>(null);
+  const [directLinkFile, setDirectLinkFile] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<{ files: string[] }>({
     queryKey: ["datafiles", folderKey, search],
@@ -112,6 +113,13 @@ function FileBrowserInner({ folderKey, title }: { folderKey: string; title: stri
         >
           {downloading ? "Downloading…" : "Download"}
         </Button>
+        <Button
+          variant="outline"
+          disabled={!selected}
+          onClick={() => selected && setDirectLinkFile(selected)}
+        >
+          Link to Pending
+        </Button>
         <span className="text-xs text-muted-foreground self-center">
           {files.length} file{files.length !== 1 ? "s" : ""} · double-click to download
         </span>
@@ -123,6 +131,14 @@ function FileBrowserInner({ folderKey, title }: { folderKey: string; title: stri
         exportData={{ export_type: "gad", gad_name: pendingFile ?? "", part_code: partCodeFromFilename(pendingFile ?? "") }}
         onClose={() => setPendingFile(null)}
         onDone={() => pendingFile && doDownload(pendingFile)}
+      />
+      <PendingLinkDialog
+        open={!!directLinkFile}
+        exportLabel={`${title}: ${directLinkFile ?? ""}`}
+        exportData={{ export_type: "gad", gad_name: directLinkFile ?? "", part_code: partCodeFromFilename(directLinkFile ?? "") }}
+        actionLabel="Link to Pending"
+        onClose={() => setDirectLinkFile(null)}
+        onDone={() => { setDirectLinkFile(null); toast.success("GAD linked to pending item"); }}
       />
     </div>
   );

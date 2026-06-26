@@ -669,6 +669,19 @@ export default function PendingPage() {
     onError: (e: any) => toast.error(apiErr(e, "Failed to unlink")),
   });
 
+  const deleteExportMut = useMutation({
+    mutationFn: (exportId: number) => {
+      const pendingCode = detailRow?.inquiry_code || String(detailRow?.sr_no ?? "");
+      return api.delete("/api/pending/my-exports", { data: { pending_code: pendingCode, export_id: exportId } });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pending-exports", detailCode, historySource] });
+      qc.invalidateQueries({ queryKey: ["pending-export-summary"] });
+      toast.success("Export entry deleted");
+    },
+    onError: (e: any) => toast.error(apiErr(e, "Failed to delete export")),
+  });
+
   const handleDrop = async (exportId: number, parent: any) => {
     if (!detailRow) return;
     const pendingCode = detailRow.inquiry_code || String(detailRow.sr_no);
@@ -1362,6 +1375,16 @@ export default function PendingPage() {
               );
             };
 
+            const DeleteBtn = ({ e }: { e: any }) => (
+              <button
+                disabled={deleteExportMut.isPending}
+                onClick={() => { if (confirm("Delete this export entry?")) deleteExportMut.mutate(e.id); }}
+                className="text-[11px] font-medium px-2 py-0.5 rounded border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-50 whitespace-nowrap"
+              >
+                Delete
+              </button>
+            );
+
             const TypeChip = ({ exportType }: { exportType: string }) => (
               <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap", EXPORT_CHIP[CHIP_KEY[exportType] ?? ""] ?? "bg-muted text-muted-foreground")}>
                 {TYPE_LABEL[exportType] ?? exportType}
@@ -1395,7 +1418,10 @@ export default function PendingPage() {
                             onDrop={() => { if (draggingId !== null) handleDrop(draggingId, parent); }}
                           >
                             <td className="px-3 py-2">
-                              {isFirstSol && <DownloadBtn e={parent} />}
+                              <div className="flex gap-1.5 items-center">
+                                {isFirstSol && <DownloadBtn e={parent} />}
+                                <DeleteBtn e={parent} />
+                              </div>
                             </td>
                             <td className="px-3 py-2 min-w-[200px]">
                               <TypeChip exportType={parent.export_type} />
@@ -1417,6 +1443,7 @@ export default function PendingPage() {
                                     Unlink
                                   </button>
                                 )}
+                                <DeleteBtn e={child} />
                               </td>
                               <td className="px-3 py-2 min-w-[200px]">
                                 <span className="inline-block w-5 text-muted-foreground/50 select-none">↳</span>
@@ -1437,7 +1464,12 @@ export default function PendingPage() {
                         onDragEnd={() => { setDraggingId(null); setDragOverParentId(null); }}
                         className={cn("border-b hover:bg-muted/30 transition-colors", historySource === "mine" && quoteParents.length > 0 && "cursor-grab", draggingId === e.id && "opacity-40")}
                       >
-                        <td className="px-3 py-2"><DownloadBtn e={e} /></td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-1.5 items-center">
+                            <DownloadBtn e={e} />
+                            <DeleteBtn e={e} />
+                          </div>
+                        </td>
                         <td className="px-3 py-2 min-w-[200px]">
                           <TypeChip exportType={e.export_type} />
                           {historySource === "mine" && quoteParents.length > 0 && <span className="ml-2 text-[10px] text-muted-foreground/50">drag to link</span>}
@@ -1502,10 +1534,9 @@ export default function PendingPage() {
                           </div>
                           <select
                             className="h-8 rounded border px-2 text-xs bg-background w-48 shrink-0"
-                            value={linkSizingMap[group.fp] ?? ""}
+                            value={linkSizingMap[group.fp] ?? "standalone"}
                             onChange={(e) => setLinkSizingMap(prev => ({ ...prev, [group.fp]: e.target.value }))}
                           >
-                            <option value="">— skip —</option>
                             {solOptions.map(o => <option key={`${o.quote_code}|${o.sol_no}`} value={o.sol_no}>{solLabel(o)}</option>)}
                             <option value="standalone">Standalone → new row</option>
                           </select>
@@ -1530,10 +1561,9 @@ export default function PendingPage() {
                         </div>
                         <select
                           className="h-8 rounded border px-2 text-xs bg-background w-48 shrink-0"
-                          value={linkSolMap[exp.id] ?? ""}
+                          value={linkSolMap[exp.id] ?? "standalone"}
                           onChange={(e) => setLinkSolMap(prev => ({ ...prev, [exp.id]: e.target.value }))}
                         >
-                          <option value="">— skip —</option>
                           {solOptions.length > 0
                             ? solOptions.map(o => <option key={`${o.quote_code}|${o.sol_no}`} value={o.sol_no}>{solLabel(o)}</option>)
                             : <option value="1">Sol 1</option>
