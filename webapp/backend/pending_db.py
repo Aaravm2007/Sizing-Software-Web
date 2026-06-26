@@ -120,7 +120,7 @@ def push_row(data: dict, username: str, path=None) -> int:
 def list_rows(path=None) -> list:
     init_db(path)
     with _conn(path) as c:
-        return [dict(r) for r in c.execute("SELECT * FROM pending ORDER BY sr_no").fetchall()]
+        return [dict(r) for r in c.execute("SELECT * FROM pending ORDER BY CASE WHEN status='completed' THEN 1 ELSE 0 END ASC, inquiry_code ASC").fetchall()]
 
 
 def list_mine(username: str, path=None) -> list:
@@ -128,7 +128,7 @@ def list_mine(username: str, path=None) -> list:
     with _conn(path) as c:
         return [
             dict(r) for r in c.execute(
-                "SELECT * FROM pending WHERE assigned_to = ? ORDER BY sr_no", (username,)
+                "SELECT * FROM pending WHERE assigned_to = ? ORDER BY CASE WHEN status='completed' THEN 1 ELSE 0 END ASC, inquiry_code ASC", (username,)
             ).fetchall()
         ]
 

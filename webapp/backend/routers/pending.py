@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from auth import get_current_user, get_expert_user
 from pending_db import push_row, list_rows, list_mine, update_row, delete_row, init_db, suggest_next_inquiry_code
 from pending_user_db import init_item_table, log_export, log_export_bulk, list_exports, list_all_tables, export_summary_all, update_export_sol_no, update_export_parent, clear_export_link, delete_export
-from pending_full_db import init_db as init_full_db, log_export as full_log_export, list_by_code as full_list_by_code
+from pending_full_db import init_db as init_full_db, log_export as full_log_export, list_by_code as full_list_by_code, export_summary_global
 from user_db import get_user_pending_db, get_user_inquiry_db, get_user_temp_db
 
 init_db()
@@ -234,12 +234,18 @@ def get_export_summary(user=Depends(get_current_user)):
     return export_summary_all(db)
 
 
+@router.get("/export-summary")
+def get_global_export_summary(_=Depends(get_current_user)):
+    return export_summary_global()
+
+
 @router.post("/my-exports")
 def add_export(body: ExportEntry, user=Depends(get_current_user)):
     db = get_user_pending_db(user["username"])
     init_item_table(body.pending_code, db)
     data = body.dict()
     row_id = log_export(body.pending_code, data, db)
+    full_log_export(body.pending_code, user["username"], data)
     return {"id": row_id}
 
 
@@ -251,6 +257,8 @@ class BulkExportEntry(BaseModel):
 def add_exports_bulk(body: BulkExportEntry, user=Depends(get_current_user)):
     db = get_user_pending_db(user["username"])
     ids = log_export_bulk(body.pending_code, body.exports, db)
+    for exp in body.exports:
+        full_log_export(body.pending_code, user["username"], exp)
     return {"ids": ids}
 
 
@@ -412,6 +420,7 @@ def export_from_quote(body: ExportFromQuoteBody, user=Depends(get_current_user))
         }
         init_item_table(body.pending_code, db_path)
         log_export(body.pending_code, export_data, db_path)
+        full_log_export(body.pending_code, user["username"], export_data)
         count += 1
 
     return {"count": count}

@@ -153,3 +153,28 @@ def list_by_code(inquiry_code: str) -> list:
             (inquiry_code,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+_BUCKET = {
+    "quote_word": "Quote", "quote_pdf": "Quote",
+    "sizing_excel": "Sizing", "sizing_pdf": "Sizing",
+    "datasheet": "Datasheet",
+    "gad": "GAD",
+}
+_LABEL_ORDER = ["Quote", "Sizing", "Datasheet", "GAD"]
+
+
+def export_summary_global() -> dict:
+    """Return {inquiry_code: [label, ...]} aggregated across all users."""
+    with _conn() as c:
+        rows = c.execute("SELECT inquiry_code, export_type FROM export_history").fetchall()
+    seen: dict[str, set] = {}
+    for r in rows:
+        code = r["inquiry_code"]
+        label = _BUCKET.get(r["export_type"])
+        if code and label:
+            seen.setdefault(code, set()).add(label)
+    return {
+        code: [l for l in _LABEL_ORDER if l in labels]
+        for code, labels in seen.items()
+    }

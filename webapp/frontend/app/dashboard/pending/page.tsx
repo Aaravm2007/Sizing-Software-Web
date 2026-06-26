@@ -306,7 +306,7 @@ export default function PendingPage() {
 
   const { data: exportSummary = {} } = useQuery<Record<string, string[]>>({
     queryKey: ["pending-export-summary"],
-    queryFn: () => api.get("/api/pending/my-export-summary").then((r) => r.data),
+    queryFn: () => api.get("/api/pending/export-summary").then((r) => r.data),
   });
 
   const detailCode = detailRow?.inquiry_code || String(detailRow?.sr_no ?? "");
@@ -707,7 +707,7 @@ export default function PendingPage() {
   // ── completed column cell ──────────────────────────────────────────────────
 
   function CompletedCell({ row }: { row: PendingRow }) {
-    const tblKey = (row.inquiry_code || String(row.sr_no)).replace(/-/g, "_");
+    const tblKey = row.inquiry_code || String(row.sr_no);
     const mailFor = (row.mail_for || "").split(", ").filter(Boolean);
     const doneSet = new Set<string>(exportSummary[tblKey] ?? []);
     const matched = mailFor.filter((mf) => doneSet.has(mf)).sort(byChipOrder);
