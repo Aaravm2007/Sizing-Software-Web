@@ -274,7 +274,7 @@ def _sizing_row_to_data(row) -> dict:
     nv = lambda v: v if v else ""
     end_v      = row[20] or 0
     energy_kwh = row[21] or 0
-    base_cap   = round((energy_kwh * 1000) / end_v, 1) if end_v > 0 else ""
+    base_cap   = row[22] or ""
     ageing     = row[12] or 0
     design     = row[13] or 0
     dod        = row[14] or 0

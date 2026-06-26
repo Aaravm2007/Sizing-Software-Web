@@ -1,6 +1,8 @@
+import calendar as _calendar
 import re
 import sqlite3
 import time
+from datetime import date as _date
 from pathlib import Path
 
 _DB_PATH = str(Path(__file__).parent.parent.parent / "data" / "inquiry.db")
@@ -25,6 +27,142 @@ _COLS = [
     "submission_date", "submitted_to", "submitted_by", "created_at", "quote_code", "sol_no",
     "dollar_rate", "base_partcode", "quote_format",
 ]
+
+
+_GLOBAL_SEARCH_COLS = [
+    "inquiry_code", "solution_provider", "project_customer", "part_code",
+    "sales_person", "handled_by", "submitted_to", "submitted_by", "ups_kva",
+    "type", "cell_type", "cell_chemistry",
+]
+_SELECT_FILTER_COLS = frozenset({"cell_type", "centre_tap", "ageing_type"})
+_DATE_FILTER_COLS   = frozenset({"inquiry_date", "submission_date"})
+_TEXT_FILTER_COLS   = frozenset({
+    "inquiry_code", "type", "sales_person", "solution_provider",
+    "project_customer", "cell_chemistry", "handled_by", "submitted_to", "submitted_by",
+})
+_ALL_FILTER_COLS = _SELECT_FILTER_COLS | _DATE_FILTER_COLS | _TEXT_FILTER_COLS
+
+
+def _date_sql(col: str, encoded: str):
+    if encoded.startswith("exact:"):
+        return f'{col} = ?', [encoded[6:]]
+    if encoded.startswith("month:"):
+        return f'{col} LIKE ?', [encoded[6:] + "%"]
+    if encoded.startswith("year:"):
+        return f'{col} LIKE ?', [encoded[5:] + "%"]
+    if encoded.startswith("from:"):
+        return f'{col} >= ?', [encoded[5:]]
+    if encoded.startswith("to:"):
+        return f'{col} <= ?', [encoded[3:]]
+    if encoded.startswith("range:"):
+        parts = encoded[6:].split("|", 1)
+        frm, to = parts[0], (parts[1] if len(parts) > 1 else "")
+        conds, params = [], []
+        if frm: conds.append(f'{col} >= ?'); params.append(frm)
+        if to:  conds.append(f'{col} <= ?'); params.append(to)
+        return (" AND ".join(conds) if conds else "1=1"), params
+    if encoded.startswith("nfrom:"):
+        parts = encoded[6:].split("|", 1)
+        n, start = int(parts[0] or 0), (parts[1] if len(parts) > 1 else "")
+        if not start: return "1=1", []
+        d = _date.fromisoformat(start)
+        month = d.month - 1 + n
+        yr = d.year + month // 12; mo = month % 12 + 1
+        end = _date(yr, mo, min(d.day, _calendar.monthrange(yr, mo)[1])).isoformat()
+        return f'{col} >= ? AND {col} <= ?', [start, end]
+    if encoded.startswith("nto:"):
+        parts = encoded[4:].split("|", 1)
+        n, end = int(parts[0] or 0), (parts[1] if len(parts) > 1 else "")
+        if not end: return "1=1", []
+        d = _date.fromisoformat(end)
+        month = d.month - 1 - n
+        yr = d.year + month // 12; mo = month % 12 + 1
+        start = _date(yr, mo, min(d.day, _calendar.monthrange(yr, mo)[1])).isoformat()
+        return f'{col} >= ? AND {col} <= ?', [start, end]
+    return f'{col} LIKE ?', [f'%{encoded}%']
+
+
+def _build_where(search: str, fields: dict):
+    conds, params = [], []
+    if search.strip():
+        q = f"%{search.strip()}%"
+        or_conds = " OR ".join(f'i."{c}" LIKE ?' for c in _GLOBAL_SEARCH_COLS)
+        conds.append(f"({or_conds})")
+        params.extend([q] * len(_GLOBAL_SEARCH_COLS))
+    for key, val in fields.items():
+        if not val or key not in _ALL_FILTER_COLS:
+            continue
+        col = f'i."{key}"'
+        if key in _DATE_FILTER_COLS:
+            frag, ps = _date_sql(col, val)
+            conds.append(frag); params.extend(ps)
+        elif key in _SELECT_FILTER_COLS:
+            conds.append(f'{col} = ?'); params.append(val)
+        else:
+            conds.append(f'{col} LIKE ?'); params.append(f'%{val}%')
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    return where, params
+
+
+_BASE_SQL = """
+    WITH grp AS (
+        SELECT inquiry_code, MAX(sr_no) AS newest_sr
+        FROM inquiry
+        WHERE inquiry_code IS NOT NULL AND inquiry_code != ''
+        GROUP BY inquiry_code
+    )
+    SELECT i.* FROM inquiry i
+    LEFT JOIN grp
+        ON i.inquiry_code = grp.inquiry_code
+       AND i.inquiry_code IS NOT NULL
+       AND i.inquiry_code != ''
+    {where}
+    ORDER BY COALESCE(grp.newest_sr, i.sr_no) DESC,
+             CAST(i.sol_no AS INTEGER) ASC,
+             i.sr_no ASC
+"""
+
+
+def list_inquiry_page(page: int, limit: int, search: str, fields: dict, db_path=None) -> list:
+    init_inquiry_db(db_path)
+    where, params = _build_where(search, fields)
+    offset = (page - 1) * limit
+    sql = _BASE_SQL.format(where=where) + " LIMIT ? OFFSET ?"
+    with _conn(db_path) as c:
+        rows = [dict(r) for r in c.execute(sql, params + [limit, offset]).fetchall()]
+    for r in rows:
+        r["_id"] = str(r["sr_no"])
+    return rows
+
+
+def count_inquiry(search: str, fields: dict, db_path=None) -> int:
+    init_inquiry_db(db_path)
+    where, params = _build_where(search, fields)
+    sql = f"""
+        WITH grp AS (
+            SELECT inquiry_code, MAX(sr_no) AS newest_sr
+            FROM inquiry
+            WHERE inquiry_code IS NOT NULL AND inquiry_code != ''
+            GROUP BY inquiry_code
+        )
+        SELECT COUNT(*) FROM inquiry i
+        LEFT JOIN grp
+            ON i.inquiry_code = grp.inquiry_code
+           AND i.inquiry_code IS NOT NULL
+           AND i.inquiry_code != ''
+        {where}
+    """
+    with _conn(db_path) as c:
+        return c.execute(sql, params).fetchone()[0]
+
+
+def export_inquiry_rows(search: str, fields: dict, db_path=None) -> list:
+    """All rows matching filters — no pagination, used for Excel export."""
+    init_inquiry_db(db_path)
+    where, params = _build_where(search, fields)
+    sql = _BASE_SQL.format(where=where)
+    with _conn(db_path) as c:
+        return [dict(r) for r in c.execute(sql, params).fetchall()]
 
 
 def _conn(db_path=None):

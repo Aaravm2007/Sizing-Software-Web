@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
@@ -8,11 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { RefreshCw, Trash2, Loader2, PackagePlus, FileUp } from "lucide-react";
+import { RefreshCw, Trash2, Loader2, PackagePlus, FileUp, Download } from "lucide-react";
 import { cn, fmtDate } from "@/lib/utils";
 import { FilterBar } from "@/components/filter-bar";
 import { FilterRow } from "@/components/filter-row";
-import { useTableFilter } from "@/lib/use-table-filter";
+import { GLOBAL_KEY, type FilterValues } from "@/lib/use-table-filter";
 
 // ── column definitions ────────────────────────────────────────────────────────
 
@@ -88,7 +88,7 @@ const COLS: Col[] = [
   { key: "submitted_by",      label: "Submitted By",       width: 130, type: "text",   filterType: "text" },
 ];
 
-const TOTAL_W = COLS.reduce((s, c) => s + c.width, 0) + 50 + 40; // +sr_no col + delete col
+const TOTAL_W = COLS.reduce((s, c) => s + c.width, 0) + 40; // +delete col
 
 const INQUIRY_SELECT_KEYS = new Set(["cell_type", "centre_tap", "ageing_type"]);
 
@@ -111,29 +111,36 @@ function displayVal(col: Col, val: string) {
 
 export default function InquiryPage() {
   const qc = useQueryClient();
-  const activeKey = ["inquiry", "global"];
 
-  const { data: entries = [], isLoading } = useQuery({
-    queryKey: activeKey,
-    queryFn: () => api.get("/api/inquiry").then(r => r.data),
+  const [filterValues, setFilterValues] = useState<FilterValues>({});
+  const [page, setPage] = useState(1);
+  const [jumpVal, setJumpVal] = useState("");
+
+  const globalSearch = filterValues[GLOBAL_KEY] ?? "";
+  const activeCount  = Object.entries(filterValues).filter(([k, v]) => k !== GLOBAL_KEY && !!v).length;
+
+  const setField = (key: string, val: string) => {
+    setFilterValues(prev => ({ ...prev, [key]: val }));
+    setPage(1);
+  };
+  const clear = () => { setFilterValues({}); setPage(1); };
+
+  const buildParams = (extraPage?: number) => {
+    const p = new URLSearchParams({ page: String(extraPage ?? page), limit: "250" });
+    if (globalSearch) p.set("search", globalSearch);
+    Object.entries(filterValues).forEach(([k, v]) => { if (k !== GLOBAL_KEY && v) p.set(k, v); });
+    return p;
+  };
+
+  const { data: pageData, isLoading, isFetching } = useQuery({
+    queryKey: ["inquiry", "global", page, filterValues],
+    queryFn: () => api.get(`/api/inquiry?${buildParams()}`).then(r => r.data),
+    placeholderData: (prev: any) => prev,
   });
 
-  const INQUIRY_SEARCH_KEYS = useMemo(() => [
-    "inquiry_code", "solution_provider", "project_customer", "part_code",
-    "sales_person", "handled_by", "submitted_to", "submitted_by", "ups_kva",
-    "type", "cell_type", "cell_chemistry",
-  ] as const, []);
-
-  const { filtered: filteredEntries, values: filterValues, globalSearch, setField, clear, activeCount } =
-    useTableFilter(entries, INQUIRY_SEARCH_KEYS as any, INQUIRY_SELECT_KEYS);
-
-  const sortedEntries = useMemo(() =>
-    [...filteredEntries].sort((a: any, b: any) =>
-      String(a.inquiry_code ?? "").toLowerCase().localeCompare(
-        String(b.inquiry_code ?? "").toLowerCase()
-      )
-    ),
-  [filteredEntries]);
+  const entries: any[]  = pageData?.rows  ?? [];
+  const totalPages: number = pageData?.pages ?? 1;
+  const totalCount: number = pageData?.total ?? 0;
 
   const { data: me } = useQuery({
     queryKey: ["me"],
@@ -158,7 +165,7 @@ export default function InquiryPage() {
 
   const delMut = useMutation({
     mutationFn: (id: string) => api.delete(`/api/inquiry/${id}`),
-    onSuccess: () => { setConfirmDelete(null); qc.invalidateQueries({ queryKey: activeKey }); },
+    onSuccess: () => { setConfirmDelete(null); qc.invalidateQueries({ queryKey: ["inquiry", "global"] }); },
     onError: (e: any) => { setConfirmDelete(null); toast.error(apiErr(e, "Delete failed")); },
   });
 
@@ -167,11 +174,23 @@ export default function InquiryPage() {
     mutationFn: ({ id, patch }: { id: string; patch: Record<string, string> }) =>
       api.patch(`/api/inquiry/${id}`, patch),
     onSuccess: (_, { id, patch }) => {
-      qc.setQueryData(activeKey, (old: any[]) =>
-        old ? old.map((e: any) => e._id === id ? { ...e, ...patch } : e) : old
+      qc.setQueryData(["inquiry", "global", page, filterValues], (old: any) =>
+        old ? { ...old, rows: old.rows.map((e: any) => e._id === id ? { ...e, ...patch } : e) } : old
       );
     },
     onError: (e: any) => toast.error(apiErr(e, "Save failed")),
+  });
+
+  // ── excel export ───────────────────────────────────────────────────────────
+  const exportMut = useMutation({
+    mutationFn: async () => {
+      const res = await api.get(`/api/inquiry/export-excel?${buildParams()}`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = "inquiry_sheet.xlsx"; a.click();
+      URL.revokeObjectURL(url);
+    },
+    onError: (e: any) => toast.error(apiErr(e, "Export failed")),
   });
 
   // ── create PO from inquiry row ─────────────────────────────────────────────
@@ -288,8 +307,8 @@ export default function InquiryPage() {
   const toggleYN = (id: string, key: string, current: string) => {
     const next = current === "YES" ? "NO" : "YES";
     patchMut.mutate({ id, patch: { [key]: next } });
-    qc.setQueryData(activeKey, (old: any[]) =>
-      old.map(e => e._id === id ? { ...e, [key]: next } : e)
+    qc.setQueryData(["inquiry", "global", page, filterValues], (old: any) =>
+      old ? { ...old, rows: old.rows.map((e: any) => e._id === id ? { ...e, [key]: next } : e) } : old
     );
   };
 
@@ -306,33 +325,75 @@ export default function InquiryPage() {
       <div className="flex items-center gap-3 px-4 py-2.5 border-b bg-background shrink-0">
         <h1 className="text-lg font-bold">UPS Inquiry Sheet</h1>
         <span className="text-xs text-muted-foreground">
-          {filteredEntries.length !== entries.length ? `${filteredEntries.length} / ${entries.length}` : entries.length} entries
+          {totalCount.toLocaleString()} entries
         </span>
+        {isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         <div className="flex-1" />
-        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => qc.invalidateQueries({ queryKey: activeKey })}>
+        {isExpert && (
+          <Button
+            size="sm" variant="outline" className="gap-1.5"
+            onClick={() => exportMut.mutate()}
+            disabled={exportMut.isPending}
+          >
+            {exportMut.isPending
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <Download className="h-3.5 w-3.5" />}
+            Export Excel
+          </Button>
+        )}
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => qc.invalidateQueries({ queryKey: ["inquiry", "global"] })}>
           <RefreshCw className="h-3.5 w-3.5" />
           Reload
         </Button>
       </div>
 
       {/* ── filter bar ── */}
-      <FilterBar
-        values={filterValues}
-        onField={setField}
-        onClear={clear}
-        globalSearch={globalSearch}
-        globalPlaceholder="Search inquiry code, customer, part code…"
-        activeCount={activeCount}
-      />
+      <div className="px-4 py-2 border-b shrink-0">
+        <FilterBar
+          values={filterValues}
+          onField={setField}
+          onClear={clear}
+          globalSearch={globalSearch}
+          globalPlaceholder="Search inquiry code, customer, part code…"
+          activeCount={activeCount}
+        />
+      </div>
+
+      {/* ── pagination ── */}
+      <div className="flex items-center gap-2 px-4 py-1.5 border-b shrink-0 text-xs text-muted-foreground select-none">
+        <Button
+          size="sm" variant="ghost" className="h-7 px-2 text-xs"
+          disabled={page <= 1}
+          onClick={() => setPage(p => p - 1)}
+        >← Prev</Button>
+        <span>Page {page} of {totalPages}</span>
+        <input
+          type="number"
+          min={1} max={totalPages}
+          value={jumpVal}
+          placeholder="Go"
+          onChange={e => setJumpVal(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === "Enter") {
+              const v = parseInt(jumpVal);
+              if (v >= 1 && v <= totalPages) setPage(v);
+              setJumpVal("");
+            }
+          }}
+          className="w-14 h-7 border rounded px-2 text-center text-xs bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <Button
+          size="sm" variant="ghost" className="h-7 px-2 text-xs"
+          disabled={page >= totalPages}
+          onClick={() => setPage(p => p + 1)}
+        >Next →</Button>
+      </div>
 
       {/* ── table ── */}
       <div className="flex-1 overflow-auto">
         <table className="border-collapse text-xs" style={{ minWidth: TOTAL_W }}>
           <thead className="sticky top-0 z-20">
             <tr className="bg-muted">
-              {/* Sr No */}
-              <th className="sticky left-0 z-30 bg-muted border border-muted px-2 py-2 text-left font-semibold"
-                style={{ width: 50, minWidth: 50 }}>Sr</th>
               {COLS.map(col => (
                 <th key={col.key}
                   className="border border-muted px-2 py-2 text-left font-semibold whitespace-nowrap"
@@ -347,7 +408,7 @@ export default function InquiryPage() {
               cols={COLS}
               values={filterValues}
               onField={setField}
-              prefixCells={[{ width: 50, sticky: true, stickyBg: "bg-background" }]}
+              prefixCells={[]}
               suffixCells={[
                 { width: 90 },
                 ...(isExpert ? [{ width: 40 }] : []),
@@ -357,19 +418,14 @@ export default function InquiryPage() {
           <tbody>
             {entries.length === 0 && (
               <tr>
-                <td colSpan={COLS.length + 2}
+                <td colSpan={COLS.length + (isExpert ? 2 : 1)}
                   className="text-center text-muted-foreground py-12 text-sm">
                   No entries yet
                 </td>
               </tr>
             )}
-            {sortedEntries.map((row: any) => (
+            {entries.map((row: any) => (
               <tr key={row._id} className="hover:bg-muted/30 group">
-                {/* Sr No — sticky */}
-                <td className="sticky left-0 z-10 bg-background group-hover:bg-muted/30 border border-muted px-2 py-1 font-mono text-muted-foreground select-none">
-                  {row.sr_no}
-                </td>
-
                 {COLS.map(col => {
                   const val = String(row[col.key] ?? "");
                   const isEditing = editing?.id === row._id && editing?.key === col.key;
