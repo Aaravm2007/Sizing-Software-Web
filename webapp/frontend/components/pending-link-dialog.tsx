@@ -20,7 +20,7 @@ interface PendingRow {
 }
 
 export interface PendingExportData {
-  export_type: string;
+  export_type?: string;
   ups_make?: string;
   ups_model?: string;
   ups_kva?: string;

@@ -111,7 +111,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const [qty, setQty] = useState("1");
 
   // add-modular form
-  const [selRack, setSelRack] = useState(MODULAR_RACKS[0].key);
+  const [selRack, setSelRack] = useState(DEFAULT_MODULAR_RACKS[0].key);
   const [modQty, setModQty] = useState("1");
   const [customDims, setCustomDims] = useState("");
   const [customPrice, setCustomPrice] = useState("");

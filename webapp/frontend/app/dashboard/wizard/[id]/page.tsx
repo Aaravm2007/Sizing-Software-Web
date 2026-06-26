@@ -388,7 +388,7 @@ export default function WizardComparePage() {
       inverter_efficiency: first?.inverter_efficiency ?? "",
       dc_voltage: first?.nominal_dc_voltage ?? "",
       backup_min: first?.backup_requirement_min ?? "",
-      cell_chemistry: first?.cell_chemistry ?? "",
+      cell_chemistry: first?.cell_type ?? "",
       capacity_ah: first?.nearest_capacity_ah ?? "",
     });
     setPendingExportFn(() => () => _doExportSizing("xlsx"));
@@ -408,7 +408,7 @@ export default function WizardComparePage() {
       inverter_efficiency: first?.inverter_efficiency ?? "",
       dc_voltage: first?.nominal_dc_voltage ?? "",
       backup_min: first?.backup_requirement_min ?? "",
-      cell_chemistry: first?.cell_chemistry ?? "",
+      cell_chemistry: first?.cell_type ?? "",
       capacity_ah: first?.nearest_capacity_ah ?? "",
     });
     setPendingExportFn(() => () => _doExportSizing("pdf"));
