@@ -28,7 +28,10 @@ def init_firebase():
         raise RuntimeError("GOOGLE_CREDENTIALS env var not set — Firebase auth unavailable")
 
     cred = credentials.Certificate(json.loads(creds_json))
-    firebase_admin.initialize_app(cred, {"databaseURL": db_url})
+    try:
+        firebase_admin.initialize_app(cred, {"databaseURL": db_url})
+    except ValueError:
+        pass  # already initialized (e.g. uvicorn reload)
     _initialized = True
 
 
