@@ -232,7 +232,7 @@ export default function POTrackingPage() {
 
   const { data: inquiryRows = [] } = useQuery<any[]>({
     queryKey: ["inquiry-global"],
-    queryFn: () => api.get("/api/inquiry").then(r => r.data),
+    queryFn: () => api.get("/api/inquiry").then(r => r.data?.rows ?? r.data),
   });
 
   // dialog states
