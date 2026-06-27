@@ -135,6 +135,8 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     capacity_ah: String(row.nearest_capacity_ah ?? ""),
     ageing_type: String(row.ageing_type ?? ""),
     backup_time_min: String(row.backup_time_min ?? ""),
+    solution_provider: String(row.solution_provider ?? ""),
+    project_customer: String(row.customer_name ?? ""),
   });
 
   const handleExport = async () => {

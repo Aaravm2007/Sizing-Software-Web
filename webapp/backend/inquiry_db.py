@@ -464,6 +464,8 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
                 **_pending_base,
                 "type": "Sizing",
                 **{f: str(e.get(f, "") or "") for f in _SIZING_FIELDS},
+                "solution_provider": str(e.get("solution_provider", "") or ""),
+                "project_customer":  str(e.get("project_customer", "") or ""),
             })
 
 
