@@ -15,13 +15,18 @@ const DC_VOLTAGES = [12, 24, 36, 48, 72, 96, 120, 144, 192, 240, 336, 360, 384, 
 const CHEMISTRIES = ["LFP"];
 const QUOTE_FORMATS = ["High voltage","Low voltage","Extended Warranty High Voltage","Extended Warranty Low Voltage","Low & High Voltage Export"];
 const EXTENDED_FORMATS = new Set(["Extended Warranty High Voltage","Extended Warranty Low Voltage"]);
+const _B = 1.10;
 const PRICE_OPTIONS = [
-  { label: "A (Cost)",    value: "A",   mult: 1.00 },
-  { label: "A+5% (B-5)", value: "B-5", mult: 1.05 },
-  { label: "A+10% (B)",  value: "B",   mult: 1.10 },
-  { label: "A+15% (B+5)",value: "B+5", mult: 1.15 },
-  { label: "A+20% (C)",  value: "C",   mult: 1.20 },
-  { label: "A+25% (C+5)",value: "C+5", mult: 1.25 },
+  { label: "A (Cost)",   value: "A",    mult: 1.0 },
+  { label: "A+5%",       value: "A+5",  mult: 1.05 },
+  { label: "A+10% (B)",  value: "B",    mult: _B },
+  { label: "B-15%",      value: "B-15", mult: _B * 0.85 },
+  { label: "B-10%",      value: "B-10", mult: _B * 0.90 },
+  { label: "B-5%",       value: "B-5",  mult: _B * 0.95 },
+  { label: "B+5%",       value: "B+5",  mult: _B * 1.05 },
+  { label: "B+10%",      value: "B+10", mult: _B * 1.10 },
+  { label: "B+15%",      value: "B+15", mult: _B * 1.15 },
+  { label: "B+20%",      value: "B+20", mult: _B * 1.20 },
 ];
 
 interface CostingResult {
@@ -496,7 +501,7 @@ export default function SizingFormPage() {
         partcode: selectedCosting.partcode,
         total_cost: selectedCosting.total_cost,
         price_option: nqPriceOption,
-        custom_pct: nqPriceOption === "custom" ? parseFloat(nqCustomPct) || 0 : 0,
+        custom_pct: (nqPriceOption === "custom" || nqPriceOption === "custom_a") ? parseFloat(nqCustomPct) || 0 : 0,
         quantity: parseInt(nqQuantity) || 1,
         actual_load_kva: parseFloat(form.actual_load_kva) || 0,
         actual_load_kw: parseFloat(form.actual_load_kw) || 0,
@@ -856,13 +861,18 @@ setAddToQuoteOpen(false);
               <button
                 onClick={() => setNqPriceOption("custom")}
                 className={`col-span-3 text-xs rounded border px-2 py-1.5 transition-colors ${nqPriceOption === "custom" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted border-border"}`}>
-                Custom %
+                Custom B±
+              </button>
+              <button
+                onClick={() => setNqPriceOption("custom_a")}
+                className={`col-span-3 text-xs rounded border px-2 py-1.5 transition-colors ${nqPriceOption === "custom_a" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted border-border"}`}>
+                Custom A+
               </button>
             </div>
-            {nqPriceOption === "custom" && (
+            {(nqPriceOption === "custom" || nqPriceOption === "custom_a") && (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">A +</span>
-                <input type="number" min="0" max="200" step="0.5"
+                <span className="text-xs text-muted-foreground">{nqPriceOption === "custom_a" ? "A +" : "B ±"}</span>
+                <input type="number" step="0.5"
                   value={nqCustomPct}
                   onChange={(e) => setNqCustomPct(e.target.value)}
                   className="h-8 w-20 rounded-md border px-2 text-sm bg-background" />
@@ -874,8 +884,10 @@ setAddToQuoteOpen(false);
                 Price: ₹{(
                   Number(selectedCosting.total_cost) *
                   (nqPriceOption === "custom"
+                    ? _B * (1 + (parseFloat(nqCustomPct) || 0) / 100)
+                    : nqPriceOption === "custom_a"
                     ? 1 + (parseFloat(nqCustomPct) || 0) / 100
-                    : (PRICE_OPTIONS.find(o => o.value === nqPriceOption)?.mult ?? 1.1))
+                    : (PRICE_OPTIONS.find(o => o.value === nqPriceOption)?.mult ?? _B))
                 ).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
               </p>
             )}
