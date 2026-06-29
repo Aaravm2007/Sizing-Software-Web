@@ -151,12 +151,12 @@ def init_item_table(pending_code: str, db_path: str):
             pass
 
 
-def log_export(pending_code: str, data: dict, db_path: str) -> int:
+def log_export(pending_code: str, data: dict, db_path: str, ts: int = None) -> int:
     init_item_table(pending_code, db_path)
     tbl = _tbl(pending_code)
     allowed = [k for k in data if k in _ITEM_COLS and k not in ("id", "exported_at")]
     allowed_with_ts = allowed + ["exported_at"]
-    values = [data[k] for k in allowed] + [int(time.time() * 1000)]
+    values = [data[k] for k in allowed] + [ts or int(time.time() * 1000)]
     cols_sql = ", ".join(f'"{c}"' for c in allowed_with_ts)
     ph = ", ".join("?" * len(allowed_with_ts))
     with _conn(db_path) as c:
@@ -164,10 +164,10 @@ def log_export(pending_code: str, data: dict, db_path: str) -> int:
         return cur.lastrowid
 
 
-def log_export_bulk(pending_code: str, entries: list[dict], db_path: str) -> list[int]:
+def log_export_bulk(pending_code: str, entries: list[dict], db_path: str, ts: int = None) -> list[int]:
     init_item_table(pending_code, db_path)
     tbl = _tbl(pending_code)
-    ts = int(time.time() * 1000)
+    ts = ts or int(time.time() * 1000)
     ids = []
     with _conn(db_path) as c:
         for data in entries:

@@ -133,7 +133,7 @@ def init_db():
 
 def log_export(inquiry_code: str, exported_by: str, data: dict) -> int:
     allowed = [k for k in _DATA_COLS if k in data]
-    ts = int(time.time() * 1000)
+    ts = data.get("exported_at") or int(time.time() * 1000)
     cols = ["inquiry_code", "exported_by", "exported_at"] + allowed
     vals = [inquiry_code, exported_by, ts] + [data[k] for k in allowed]
     cols_sql = ", ".join(cols)

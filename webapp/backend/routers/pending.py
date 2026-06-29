@@ -241,11 +241,13 @@ def get_global_export_summary(_=Depends(get_current_user)):
 
 @router.post("/my-exports")
 def add_export(body: ExportEntry, user=Depends(get_current_user)):
+    import time as _time
     db = get_user_pending_db(user["username"])
     init_item_table(body.pending_code, db)
+    ts = int(_time.time() * 1000)
     data = body.dict()
-    row_id = log_export(body.pending_code, data, db)
-    full_log_export(body.pending_code, user["username"], data)
+    row_id = log_export(body.pending_code, data, db, ts=ts)
+    full_log_export(body.pending_code, user["username"], {**data, "exported_at": ts})
     return {"id": row_id}
 
 
@@ -255,10 +257,12 @@ class BulkExportEntry(BaseModel):
 
 @router.post("/my-exports/bulk", status_code=201)
 def add_exports_bulk(body: BulkExportEntry, user=Depends(get_current_user)):
+    import time as _time
+    ts = int(_time.time() * 1000)
     db = get_user_pending_db(user["username"])
-    ids = log_export_bulk(body.pending_code, body.exports, db)
+    ids = log_export_bulk(body.pending_code, body.exports, db, ts=ts)
     for exp in body.exports:
-        full_log_export(body.pending_code, user["username"], exp)
+        full_log_export(body.pending_code, user["username"], {**exp, "exported_at": ts})
     return {"ids": ids}
 
 
@@ -418,9 +422,11 @@ def export_from_quote(body: ExportFromQuoteBody, user=Depends(get_current_user))
             "quote_format":   str(inq_row.get("quote_format") or ""),
             "base_partcode":  str(inq_row.get("base_partcode") or ""),
         }
+        import time as _time
+        ts = int(_time.time() * 1000)
         init_item_table(body.pending_code, db_path)
-        log_export(body.pending_code, export_data, db_path)
-        full_log_export(body.pending_code, user["username"], export_data)
+        log_export(body.pending_code, export_data, db_path, ts=ts)
+        full_log_export(body.pending_code, user["username"], {**export_data, "exported_at": ts})
         count += 1
 
     return {"count": count}
