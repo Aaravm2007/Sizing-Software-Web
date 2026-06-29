@@ -239,6 +239,36 @@ def get_global_export_summary(_=Depends(get_current_user)):
     return export_summary_global()
 
 
+_SIZING_MATCH_FIELDS = [
+    "ups_make", "ups_model", "ups_kva", "actual_load_kva", "load_kw",
+    "power_factor", "inverter_efficiency", "dc_voltage", "backup_min",
+    "cell_chemistry", "ageing_pct", "design_margin_pct", "dod_margin_pct",
+    "derating_pct", "capacity_ah", "ageing_type", "backup_time_min",
+]
+
+def _find_matching_sol(data: dict, pending_code: str, db: str) -> str | None:
+    existing = list_exports(pending_code, db)
+    quote_sols = [
+        e for e in existing
+        if e.get("export_type", "").startswith("quote_") and e.get("sol_no", "")
+    ]
+    for qe in sorted(quote_sols, key=lambda e: str(e.get("sol_no", ""))):
+        compared = 0
+        match = True
+        for f in _SIZING_MATCH_FIELDS:
+            sv = str(data.get(f, "") or "").strip()
+            qv = str(qe.get(f, "") or "").strip()
+            if not sv or not qv:
+                continue
+            compared += 1
+            if sv != qv:
+                match = False
+                break
+        if match and compared > 0:
+            return str(qe["sol_no"])
+    return None
+
+
 @router.post("/my-exports")
 def add_export(body: ExportEntry, user=Depends(get_current_user)):
     import time as _time
@@ -247,6 +277,11 @@ def add_export(body: ExportEntry, user=Depends(get_current_user)):
     ts = int(_time.time() * 1000)
     data = body.dict()
     row_id = log_export(body.pending_code, data, db, ts=ts)
+    if data.get("export_type", "").startswith("sizing_"):
+        matched_sol = _find_matching_sol(data, body.pending_code, db)
+        if matched_sol:
+            update_export_sol_no(body.pending_code, row_id, matched_sol, db)
+            data["sol_no"] = matched_sol
     full_log_export(body.pending_code, user["username"], {**data, "exported_at": ts})
     return {"id": row_id}
 
