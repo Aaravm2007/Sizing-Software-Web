@@ -251,6 +251,7 @@ export default function PendingPage() {
   const me = getUsername();
 
   const [tab, setTab] = useState<"global" | "mine" | "completed">("global");
+  const [hideCompleted, setHideCompleted] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editRow, setEditRow] = useState<PendingRow | null>(null);
   const [form, setForm] = useState({ ...EMPTY });
@@ -290,7 +291,6 @@ export default function PendingPage() {
   const { data: users = [] } = useQuery<UserEntry[]>({
     queryKey: ["auth-users"],
     queryFn: () => api.get("/api/auth/users").then((r) => r.data),
-    enabled: isExpert,
   });
 
   const { data: durations = [] } = useQuery<string[]>({
@@ -427,7 +427,8 @@ export default function PendingPage() {
   const activeRows = useMemo(() => mineRows.filter((r) => r.status !== "completed"), [mineRows]);
   const completedMineRows = useMemo(() => mineRows.filter((r) => r.status === "completed"), [mineRows]);
 
-  const rows = tab === "global" ? sortedGlobal : tab === "mine" ? activeRows : completedMineRows;
+  const globalRows_ = hideCompleted ? sortedGlobal.filter((r) => r.status !== "completed") : sortedGlobal;
+  const rows = tab === "global" ? globalRows_ : tab === "mine" ? activeRows : completedMineRows;
   const isLoading = tab === "global" ? loadingGlobal : loadingMine;
 
   const pendingUserOptions = useMemo(
@@ -752,13 +753,11 @@ export default function PendingPage() {
       {/* header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Pending Sheet</h1>
-        {isExpert && (
-          <Button onClick={openAdd}>+ Add Entry</Button>
-        )}
+        <Button onClick={openAdd}>+ Add Entry</Button>
       </div>
 
       {/* tabs */}
-      <div className="flex gap-1 border-b">
+      <div className="flex items-center gap-1 border-b">
         {([
           { key: "global",    label: "Global Sheet" },
           { key: "mine",      label: `My Pending${activeRows.length ? ` (${activeRows.length})` : ""}` },
@@ -777,6 +776,19 @@ export default function PendingPage() {
             {label}
           </button>
         ))}
+        {tab === "global" && (
+          <button
+            onClick={() => setHideCompleted((v) => !v)}
+            className={cn(
+              "ml-auto mr-1 mb-px px-3 py-1 text-xs font-medium rounded border transition-colors",
+              hideCompleted
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-muted-foreground border-border hover:text-foreground",
+            )}
+          >
+            {hideCompleted ? "Show completed" : "Hide completed"}
+          </button>
+        )}
       </div>
 
       {/* filter bar */}

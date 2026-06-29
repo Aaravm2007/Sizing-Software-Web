@@ -71,7 +71,7 @@ def get_mine(user=Depends(get_current_user)):
 
 
 @router.post("", status_code=201)
-def create(body: PendingEntry, user=Depends(get_expert_user)):
+def create(body: PendingEntry, user=Depends(get_current_user)):
     row_id = push_row(body.dict(), user["username"])
     return {"id": row_id}
 
