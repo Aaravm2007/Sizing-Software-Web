@@ -246,6 +246,30 @@ _SIZING_MATCH_FIELDS = [
     "derating_pct", "capacity_ah", "ageing_type", "backup_time_min",
 ]
 
+def _auto_link_sizings_to_quote(quote_data: dict, sol_no: str, pending_code: str, db: str):
+    """After a quote is logged, back-fill sol_no on any unlinked sizing exports that match."""
+    existing = list_exports(pending_code, db)
+    unlinked_sizings = [
+        e for e in existing
+        if e.get("export_type", "").startswith("sizing_")
+        and not e.get("sol_no", "")
+    ]
+    for se in unlinked_sizings:
+        compared = 0
+        match = True
+        for f in _SIZING_MATCH_FIELDS:
+            sv = str(se.get(f, "") or "").strip()
+            qv = str(quote_data.get(f, "") or "").strip()
+            if not sv or not qv:
+                continue
+            compared += 1
+            if sv != qv:
+                match = False
+                break
+        if match and compared > 0:
+            update_export_sol_no(pending_code, se["id"], sol_no, db)
+
+
 def _find_matching_sol(data: dict, pending_code: str, db: str) -> str | None:
     existing = list_exports(pending_code, db)
     quote_sols = [
@@ -459,9 +483,12 @@ def export_from_quote(body: ExportFromQuoteBody, user=Depends(get_current_user))
         }
         import time as _time
         ts = int(_time.time() * 1000)
+        sol_no = str(export_data.get("sol_no", "") or "")
         init_item_table(body.pending_code, db_path)
         log_export(body.pending_code, export_data, db_path, ts=ts)
         full_log_export(body.pending_code, user["username"], {**export_data, "exported_at": ts})
+        if sol_no:
+            _auto_link_sizings_to_quote(export_data, sol_no, body.pending_code, db_path)
         count += 1
 
     return {"count": count}
