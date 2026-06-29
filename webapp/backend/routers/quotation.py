@@ -521,6 +521,8 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
     }
     if body.price_option == "custom":
         mult = _B * (1.0 + body.custom_pct / 100.0)
+    elif body.price_option == "custom_a":
+        mult = 1.0 + body.custom_pct / 100.0
     else:
         mult = multipliers.get(body.price_option, 1.0)
     quote_price = round(base_price * mult, 2)
@@ -626,7 +628,12 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
         "B-15": _B * 0.85, "B-10": _B * 0.90, "B-5": _B * 0.95,
         "B+5": _B * 1.05, "B+10": _B * 1.10, "B+15": _B * 1.15, "B+20": _B * 1.20,
     }
-    mult = (_B * (1.0 + body.custom_pct / 100.0)) if body.price_option == "custom" else multipliers.get(body.price_option, _B)
+    if body.price_option == "custom":
+        mult = _B * (1.0 + body.custom_pct / 100.0)
+    elif body.price_option == "custom_a":
+        mult = 1.0 + body.custom_pct / 100.0
+    else:
+        mult = multipliers.get(body.price_option, _B)
     quote_price = round(body.total_cost * mult, 2)
 
     tdb = _tdb(user["username"], scope)

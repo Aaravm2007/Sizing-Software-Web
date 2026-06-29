@@ -685,12 +685,18 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                       <input type="radio" name="priceOpt" value="custom"
                         checked={priceOption === "custom"}
                         onChange={() => setPriceOption("custom")} />
-                      Custom %
+                      Custom B±
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer col-span-2">
+                      <input type="radio" name="priceOpt" value="custom_a"
+                        checked={priceOption === "custom_a"}
+                        onChange={() => setPriceOption("custom_a")} />
+                      Custom A+
                     </label>
                   </div>
-                  {priceOption === "custom" && (
+                  {(priceOption === "custom" || priceOption === "custom_a") && (
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-muted-foreground">B ±</span>
+                      <span className="text-muted-foreground">{priceOption === "custom_a" ? "A +" : "B ±"}</span>
                       <Input
                         type="number"
                         className="w-24"
@@ -700,7 +706,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                       />
                       <span className="text-muted-foreground">%</span>
                       <span className="text-muted-foreground">
-                        = {Math.round(parseFloat(String(costingRows[selCostingIdx]?.total_cost ?? 0)) * _B * (1 + (parseFloat(customPct) || 0) / 100) * 100) / 100}
+                        = {Math.round(parseFloat(String(costingRows[selCostingIdx]?.total_cost ?? 0)) * (priceOption === "custom_a" ? 1 : _B) * (1 + (parseFloat(customPct) || 0) / 100) * 100) / 100}
                       </span>
                     </div>
                   )}
