@@ -17,8 +17,14 @@ import {
 import { PendingLinkDialog } from "@/components/pending-link-dialog";
 
 const FORMATS = ["High voltage", "Low voltage", "Extended Warranty High Voltage", "Extended Warranty Low Voltage", "Low & High Voltage Export"];
-const PRICE_OPTIONS = ["A", "B-5", "B", "B+5", "C", "C+5", "custom"] as const;
+const PRICE_OPTIONS = ["A", "A+5", "B", "B-15", "B-10", "B-5", "B+5", "B+10", "B+15", "B+20", "custom"] as const;
 type PriceOption = typeof PRICE_OPTIONS[number];
+const _PRICE_LABELS: Record<string, string> = {
+  "A": "A", "A+5": "A+5%", "B": "A+10% (B)",
+  "B-15": "B-15%", "B-10": "B-10%", "B-5": "B-5%",
+  "B+5": "B+5%", "B+10": "B+10%", "B+15": "B+15%", "B+20": "B+20%",
+  "custom": "Custom",
+};
 
 const DC_VOLTAGES = [12, 24, 36, 48, 72, 96, 120, 144, 192, 240, 336, 360, 384, 408, 480, 512, 528, 576];
 const COL_W = 210;
@@ -995,13 +1001,13 @@ export default function WizardComparePage() {
                     className={cn("rounded border px-2 py-1 text-xs font-medium transition-colors",
                       priceOption === opt ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted")}
                     onClick={() => setPriceOption(opt)}>
-                    {opt === "custom" ? "Custom %" : `A+${opt === "A" ? "0" : opt.replace("B-5","5").replace("B","10").replace("B+5","15").replace("C","20").replace("C+5","25")}%`}
+                    {_PRICE_LABELS[opt] ?? opt}
                   </button>
                 ))}
               </div>
               {priceOption === "custom" && (
                 <div className="flex items-center gap-2 mt-1">
-                  <Label className="text-xs whitespace-nowrap">A +</Label>
+                  <Label className="text-xs whitespace-nowrap">B ±</Label>
                   <Input className="h-7 w-20" type="number" value={customPct} onChange={e => setCustomPct(e.target.value)} />
                   <span className="text-xs">%</span>
                 </div>

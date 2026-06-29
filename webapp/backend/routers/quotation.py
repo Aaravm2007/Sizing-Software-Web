@@ -513,9 +513,14 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
         except ValueError: return -1
 
     base_price = float(row[idx("Total Cost of Pack (A)")] or 0)
-    multipliers = {"A": 1.0, "B-5": 1.05, "B": 1.10, "B+5": 1.15, "C": 1.20, "C+5": 1.25}
+    _B = 1.10
+    multipliers = {
+        "A": 1.0, "A+5": 1.05, "B": _B,
+        "B-15": _B * 0.85, "B-10": _B * 0.90, "B-5": _B * 0.95,
+        "B+5": _B * 1.05, "B+10": _B * 1.10, "B+15": _B * 1.15, "B+20": _B * 1.20,
+    }
     if body.price_option == "custom":
-        mult = 1.0 + (body.custom_pct / 100.0)
+        mult = _B * (1.0 + body.custom_pct / 100.0)
     else:
         mult = multipliers.get(body.price_option, 1.0)
     quote_price = round(base_price * mult, 2)
@@ -615,8 +620,13 @@ class AddFromWizardReq(BaseModel):
 
 @router.post("/quotes/{code}/add-from-sizing-screen", status_code=201)
 def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_user), scope: str = Query("regular")):
-    multipliers = {"A": 1.0, "B-5": 1.05, "B": 1.10, "B+5": 1.15, "C": 1.20, "C+5": 1.25}
-    mult = (1.0 + body.custom_pct / 100.0) if body.price_option == "custom" else multipliers.get(body.price_option, 1.10)
+    _B = 1.10
+    multipliers = {
+        "A": 1.0, "A+5": 1.05, "B": _B,
+        "B-15": _B * 0.85, "B-10": _B * 0.90, "B-5": _B * 0.95,
+        "B+5": _B * 1.05, "B+10": _B * 1.10, "B+15": _B * 1.15, "B+20": _B * 1.20,
+    }
+    mult = (_B * (1.0 + body.custom_pct / 100.0)) if body.price_option == "custom" else multipliers.get(body.price_option, _B)
     quote_price = round(body.total_cost * mult, 2)
 
     tdb = _tdb(user["username"], scope)

@@ -54,13 +54,18 @@ interface CostingRow {
   partcode: string;
 }
 
+const _B = 1.10;
 const PRICE_OPTIONS = [
-  { label: "A (Cost)", value: "A" },
-  { label: "A+5% (B-5)", value: "B-5" },
-  { label: "A+10% (B)", value: "B" },
-  { label: "A+15% (B+5)", value: "B+5" },
-  { label: "A+20% (C)", value: "C" },
-  { label: "A+25% (C+5)", value: "C+5" },
+  { label: "A (Cost)",      value: "A" },
+  { label: "A+5%",         value: "A+5" },
+  { label: "A+10% (B)",    value: "B" },
+  { label: "B-15%",        value: "B-15" },
+  { label: "B-10%",        value: "B-10" },
+  { label: "B-5%",         value: "B-5" },
+  { label: "B+5%",         value: "B+5" },
+  { label: "B+10%",        value: "B+10" },
+  { label: "B+15%",        value: "B+15" },
+  { label: "B+20%",        value: "B+20" },
 ];
 
 const DEFAULT_MODULAR_RACKS = [
@@ -76,7 +81,9 @@ const DEFAULT_MODULAR_RACKS = [
 ];
 
 const MULT: Record<string, number> = {
-  "A": 1.0, "B-5": 1.05, "B": 1.10, "B+5": 1.15, "C": 1.20, "C+5": 1.25,
+  "A": 1.0, "A+5": 1.05, "B": _B,
+  "B-15": _B * 0.85, "B-10": _B * 0.90, "B-5": _B * 0.95,
+  "B+5": _B * 1.05, "B+10": _B * 1.10, "B+15": _B * 1.15, "B+20": _B * 1.20,
 };
 
 function SortableItem({ id, children }: { id: number; children: (dragHandleProps: React.HTMLAttributes<HTMLElement>) => React.ReactNode }) {
@@ -683,18 +690,17 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                   </div>
                   {priceOption === "custom" && (
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-muted-foreground">A +</span>
+                      <span className="text-muted-foreground">B ±</span>
                       <Input
                         type="number"
                         className="w-24"
-                        min="0"
                         value={customPct}
                         onChange={(e) => setCustomPct(e.target.value)}
-                        placeholder="e.g. 30"
+                        placeholder="e.g. 5"
                       />
                       <span className="text-muted-foreground">%</span>
                       <span className="text-muted-foreground">
-                        = {Math.round(parseFloat(String(costingRows[selCostingIdx]?.total_cost ?? 0)) * (1 + (parseFloat(customPct) || 0) / 100) * 100) / 100}
+                        = {Math.round(parseFloat(String(costingRows[selCostingIdx]?.total_cost ?? 0)) * _B * (1 + (parseFloat(customPct) || 0) / 100) * 100) / 100}
                       </span>
                     </div>
                   )}
