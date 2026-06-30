@@ -1327,24 +1327,48 @@ export default function PendingPage() {
             const childrenByParent = new Map<number, any[]>();
             let standalones: any[];
 
+            // dedupe quote exports by sol_no — one parent row per solution,
+            // secondary quote formats (word vs pdf) become children of the primary
+            const dedupeQuotes = (allQuotes: any[]): { parents: any[]; extras: Map<string, any[]> } => {
+              const seen = new Map<string, any>();
+              const extras = new Map<string, any[]>();
+              for (const e of allQuotes) {
+                const sol = String(e.sol_no || "");
+                if (!seen.has(sol)) { seen.set(sol, e); }
+                else { if (!extras.has(sol)) extras.set(sol, []); extras.get(sol)!.push(e); }
+              }
+              return { parents: Array.from(seen.values()), extras };
+            };
+
             if (historySource === "full") {
-              // full_db has no parent_id — group by sol_no instead
-              quoteParents = detailExports.filter((e: any) => e.export_type?.startsWith("quote_") && e.sol_no).sort(solSort);
+              const allQuotes = detailExports.filter((e: any) => e.export_type?.startsWith("quote_") && e.sol_no).sort(solSort);
+              const { parents, extras } = dedupeQuotes(allQuotes);
+              quoteParents = parents;
               for (const parent of quoteParents) {
-                const kids = detailExports
-                  .filter((e: any) => !e.export_type?.startsWith("quote_") && e.sol_no === parent.sol_no)
-                  .sort(byTypeOrder);
+                const sol = String(parent.sol_no || "");
+                const kids = [
+                  ...(extras.get(sol) ?? []),
+                  ...detailExports.filter((e: any) => !e.export_type?.startsWith("quote_") && e.sol_no === sol),
+                ].sort(byTypeOrder);
                 if (kids.length) childrenByParent.set(parent.id, kids);
               }
               standalones = detailExports.filter((e: any) => !e.export_type?.startsWith("quote_") && !e.sol_no).sort(byTypeOrder);
             } else {
-              // mine: use parent_id set by link endpoint
-              quoteParents = detailExports.filter((e: any) => e.export_type?.startsWith("quote_") && !e.parent_id).sort(solSort);
+              const allQuotes = detailExports.filter((e: any) => e.export_type?.startsWith("quote_") && !e.parent_id).sort(solSort);
+              const { parents, extras } = dedupeQuotes(allQuotes);
+              quoteParents = parents;
               for (const e of detailExports) {
                 if (e.parent_id) {
                   if (!childrenByParent.has(e.parent_id)) childrenByParent.set(e.parent_id, []);
                   childrenByParent.get(e.parent_id)!.push(e);
                 }
+              }
+              // merge extra quote formats into primary's children
+              for (const parent of quoteParents) {
+                const sol = String(parent.sol_no || "");
+                const existing = childrenByParent.get(parent.id) ?? [];
+                const ex = extras.get(sol) ?? [];
+                if (ex.length) childrenByParent.set(parent.id, [...ex, ...existing].sort(byTypeOrder));
               }
               for (const [pid, kids] of childrenByParent) childrenByParent.set(pid, [...kids].sort(byTypeOrder));
               standalones = detailExports.filter((e: any) => !e.parent_id && !e.export_type?.startsWith("quote_")).sort(byTypeOrder);
