@@ -101,7 +101,7 @@ const EMPTY: FormState = {
 function n(v: string) { return parseFloat(v) || 0; }
 function fmt(v: number) { return isNaN(v) || !isFinite(v) ? "" : String(Math.round(v * 100) / 100); }
 
-function recalc(f: FormState): Partial<FormState> {
+function recalc(f: FormState, locked: Set<string> = new Set()): Partial<FormState> {
   const updates: Partial<FormState> = {};
 
   // kw = (V * Ah) / 1000
@@ -149,18 +149,21 @@ function recalc(f: FormState): Partial<FormState> {
   const totalOther = otherFields.reduce((s, k) => s + n(f[k] as string), 0);
   updates.total_other = fmt(totalOther);
 
-  // use updated inr values
   const inr1 = f.currency_mode_1 === "INR" ? totalFob : (n(updates.total_landed_1 ?? f.total_landed_1) * dr);
   const inr2 = f.currency_mode_2 === "INR" ? n(f.bms_pcm_cost) : (n(updates.total_landed_2 ?? f.total_landed_2) * dr);
 
-  const landing = inr1 + inr2 + totalOther;
-  updates.landing_cost = fmt(landing);
-  const warranty = landing * 0.1;
-  const labour = landing * 0.1;
-  updates.warranty = fmt(warranty);
-  updates.labour = fmt(labour);
-  const totalCost = landing + warranty + labour;
-  updates.total_cost = fmt(totalCost);
+  const computedLanding = inr1 + inr2 + totalOther;
+  const landing = locked.has("landing_cost") ? n(f.landing_cost) : computedLanding;
+  if (!locked.has("landing_cost")) updates.landing_cost = fmt(landing);
+
+  const warranty = locked.has("warranty") ? n(f.warranty) : landing * 0.1;
+  if (!locked.has("warranty")) updates.warranty = fmt(warranty);
+
+  const labour = locked.has("labour") ? n(f.labour) : landing * 0.1;
+  if (!locked.has("labour")) updates.labour = fmt(labour);
+
+  const totalCost = locked.has("total_cost") ? n(f.total_cost) : landing + warranty + labour;
+  if (!locked.has("total_cost")) updates.total_cost = fmt(totalCost);
 
   const margin10 = totalCost * 0.1;
   const margin15 = totalCost * 0.15;
@@ -232,6 +235,7 @@ function NewCostingInner() {
   const qc = useQueryClient();
 
   const [form, setForm] = useState<FormState>(EMPTY);
+  const [locked, setLocked] = useState<Set<string>>(new Set());
 
   const { data: durations = [] } = useQuery<string[]>({
     queryKey: ["costing-durations"],
@@ -260,6 +264,7 @@ function NewCostingInner() {
     const idx = parseInt(editIdx, 10);
     const row = existingRows[idx];
     if (!row) return;
+    setLocked(new Set());
     setForm({
       dollar_rate: String(row.dollar_rate ?? "97"),
       creation_date: String(row.creation_date ?? ""),
@@ -325,7 +330,17 @@ function NewCostingInner() {
   const update = (k: keyof FormState, v: string) => {
     setForm((f) => {
       const next = { ...f, [k]: v };
-      return { ...next, ...recalc(next) };
+      return { ...next, ...recalc(next, locked) };
+    });
+  };
+
+  const updateManual = (k: "landing_cost" | "labour" | "warranty" | "total_cost", v: string) => {
+    const newLocked = new Set(locked);
+    if (v === "") newLocked.delete(k); else newLocked.add(k);
+    setLocked(newLocked);
+    setForm((f) => {
+      const next = { ...f, [k]: v };
+      return { ...next, ...recalc(next, newLocked) };
     });
   };
 
@@ -552,10 +567,18 @@ function NewCostingInner() {
           </Section>
 
           <Section title="Cost Calculations">
-            <Row label="Landing Cost (1+2+3)"><ReadonlyMoney value={form.landing_cost} /></Row>
-            <Row label="Production Labour"><ReadonlyMoney value={form.labour} /></Row>
-            <Row label="Warranty & Service"><ReadonlyMoney value={form.warranty} /></Row>
-            <Row label="Total Cost of Pack (A)"><ReadonlyMoney value={form.total_cost} /></Row>
+            <Row label="Landing Cost (1+2+3)">
+              <Input type="number" value={form.landing_cost} onChange={e => updateManual("landing_cost", e.target.value)} className={locked.has("landing_cost") ? "border-amber-400" : ""} placeholder="auto" />
+            </Row>
+            <Row label="Production Labour">
+              <Input type="number" value={form.labour} onChange={e => updateManual("labour", e.target.value)} className={locked.has("labour") ? "border-amber-400" : ""} placeholder="auto" />
+            </Row>
+            <Row label="Warranty & Service">
+              <Input type="number" value={form.warranty} onChange={e => updateManual("warranty", e.target.value)} className={locked.has("warranty") ? "border-amber-400" : ""} placeholder="auto" />
+            </Row>
+            <Row label="Total Cost of Pack (A)">
+              <Input type="number" value={form.total_cost} onChange={e => updateManual("total_cost", e.target.value)} className={locked.has("total_cost") ? "border-amber-400" : ""} placeholder="auto" />
+            </Row>
             <Row label="Margin @10% on Cost"><ReadonlyMoney value={form.margin_10} /></Row>
             <Row label="Estimated Sales Cost (B)"><ReadonlyMoney value={form.est_sales_b} /></Row>
             <Row label="Margin @15% on Cost"><ReadonlyMoney value={form.margin_15} /></Row>
