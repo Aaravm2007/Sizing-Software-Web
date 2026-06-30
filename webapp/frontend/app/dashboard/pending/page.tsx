@@ -273,8 +273,6 @@ export default function PendingPage() {
   const [linkSolMap, setLinkSolMap] = useState<Record<number, string>>({});
   const [linkSizingGroups, setLinkSizingGroups] = useState<{ fp: string; exports: any[] }[]>([]);
   const [linkSizingMap, setLinkSizingMap] = useState<Record<string, string>>({});
-  const [draggingId, setDraggingId] = useState<number | null>(null);
-  const [dragOverParentId, setDragOverParentId] = useState<number | null>(null);
 
   // ── queries ────────────────────────────────────────────────────────────────
 
@@ -683,20 +681,17 @@ export default function PendingPage() {
     onError: (e: any) => toast.error(apiErr(e, "Failed to delete export")),
   });
 
-  const handleDrop = async (exportId: number, parent: any) => {
+  const handleLink = async (exportId: number, sol_no: string) => {
     if (!detailRow) return;
     const pendingCode = detailRow.inquiry_code || String(detailRow.sr_no);
     try {
       await api.patch("/api/pending/my-exports/link", {
-        links: [{ pending_code: pendingCode, export_id: exportId, sol_no: parent.sol_no }],
+        links: [{ pending_code: pendingCode, export_id: exportId, sol_no }],
       });
       qc.invalidateQueries({ queryKey: ["pending-exports", detailCode, historySource] });
       qc.invalidateQueries({ queryKey: ["pending-export-summary"] });
     } catch (e: any) {
       toast.error(apiErr(e, "Failed to link export"));
-    } finally {
-      setDraggingId(null);
-      setDragOverParentId(null);
     }
   };
 
@@ -1403,6 +1398,28 @@ export default function PendingPage() {
               </span>
             );
 
+            const SolDropdown = ({ e }: { e: any }) => {
+              if (historySource !== "mine" || quoteParents.length === 0) return null;
+              return (
+                <select
+                  value={e.sol_no || ""}
+                  className="text-xs rounded border px-1 py-0.5 bg-background max-w-[130px]"
+                  onChange={(ev) => {
+                    const val = ev.target.value;
+                    if (val === "") unlinkMut.mutate(e.id);
+                    else handleLink(e.id, val);
+                  }}
+                >
+                  <option value="">— Unlinked</option>
+                  {quoteParents.map((p: any) => (
+                    <option key={p.sol_no} value={p.sol_no}>
+                      Sol {p.sol_no}{p.part_code ? ` · ${p.part_code}` : ""}
+                    </option>
+                  ))}
+                </select>
+              );
+            };
+
             return (
               <div className="overflow-auto max-h-[70vh]">
                 <table className="table-grid text-xs min-w-max">
@@ -1410,6 +1427,9 @@ export default function PendingPage() {
                     <tr>
                       <th className="px-3 py-2" />
                       <th className="text-left px-3 py-2 whitespace-nowrap min-w-[200px]">Type</th>
+                      {historySource === "mine" && quoteParents.length > 0 && (
+                        <th className="text-left px-3 py-2 whitespace-nowrap">Solution</th>
+                      )}
                       {activeCols.map((col) => (
                         <th key={col.key} className="text-left px-3 py-2 whitespace-nowrap">{col.label}</th>
                       ))}
@@ -1423,12 +1443,7 @@ export default function PendingPage() {
                       const isFirstSol = parent.sol_no === minSolNo;
                       return (
                         <React.Fragment key={parent.id}>
-                          <tr
-                            className={cn("border-b hover:bg-muted/30 transition-colors", dragOverParentId === parent.id && "bg-primary/10 outline outline-1 outline-primary")}
-                            onDragOver={(ev) => { ev.preventDefault(); setDragOverParentId(parent.id); }}
-                            onDragLeave={() => setDragOverParentId(null)}
-                            onDrop={() => { if (draggingId !== null) handleDrop(draggingId, parent); }}
-                          >
+                          <tr className="border-b hover:bg-muted/30 transition-colors">
                             <td className="px-3 py-2">
                               <div className="flex gap-1.5 items-center">
                                 {isFirstSol && <DownloadBtn e={parent} />}
@@ -1439,43 +1454,33 @@ export default function PendingPage() {
                               <TypeChip exportType={parent.export_type} />
                               {parent.sol_no && <span className="ml-2 text-[10px] text-muted-foreground">Sol {parent.sol_no}</span>}
                             </td>
+                            {historySource === "mine" && quoteParents.length > 0 && <td className="px-3 py-2" />}
                             <DataCells e={parent} />
                           </tr>
                           {myChildren.map((child: any) => (
                             <tr key={child.id} className="border-b hover:bg-muted/30 bg-muted/10">
-                              <td className="px-3 py-2 flex gap-1.5 items-center">
-                                <DownloadBtn e={child} />
-                                {historySource === "mine" && (
-                                  <button
-                                    onClick={() => unlinkMut.mutate(child.id)}
-                                    disabled={unlinkMut.isPending}
-                                    title="Unlink from solution"
-                                    className="text-[11px] font-medium px-2 py-0.5 rounded border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-50 whitespace-nowrap"
-                                  >
-                                    Unlink
-                                  </button>
-                                )}
-                                <DeleteBtn e={child} />
+                              <td className="px-3 py-2">
+                                <div className="flex gap-1.5 items-center">
+                                  <DownloadBtn e={child} />
+                                  <DeleteBtn e={child} />
+                                </div>
                               </td>
                               <td className="px-3 py-2 min-w-[200px]">
                                 <span className="inline-block w-5 text-muted-foreground/50 select-none">↳</span>
                                 <TypeChip exportType={child.export_type} />
                               </td>
+                              {historySource === "mine" && quoteParents.length > 0 && (
+                                <td className="px-3 py-2"><SolDropdown e={child} /></td>
+                              )}
                               <DataCells e={child} />
                             </tr>
                           ))}
                         </React.Fragment>
                       );
                     })}
-                    {/* standalone top-level rows — draggable onto quote parents */}
+                    {/* standalone rows */}
                     {standalones.map((e: any) => (
-                      <tr
-                        key={e.id}
-                        draggable={historySource === "mine" && quoteParents.length > 0}
-                        onDragStart={() => setDraggingId(e.id)}
-                        onDragEnd={() => { setDraggingId(null); setDragOverParentId(null); }}
-                        className={cn("border-b hover:bg-muted/30 transition-colors", historySource === "mine" && quoteParents.length > 0 && "cursor-grab", draggingId === e.id && "opacity-40")}
-                      >
+                      <tr key={e.id} className="border-b hover:bg-muted/30 transition-colors">
                         <td className="px-3 py-2">
                           <div className="flex gap-1.5 items-center">
                             <DownloadBtn e={e} />
@@ -1484,8 +1489,10 @@ export default function PendingPage() {
                         </td>
                         <td className="px-3 py-2 min-w-[200px]">
                           <TypeChip exportType={e.export_type} />
-                          {historySource === "mine" && quoteParents.length > 0 && <span className="ml-2 text-[10px] text-muted-foreground/50">drag to link</span>}
                         </td>
+                        {historySource === "mine" && quoteParents.length > 0 && (
+                          <td className="px-3 py-2"><SolDropdown e={e} /></td>
+                        )}
                         <DataCells e={e} />
                       </tr>
                     ))}
