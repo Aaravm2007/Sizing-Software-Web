@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
@@ -107,6 +107,34 @@ function displayVal(col: Col, val: string) {
   return val || "";
 }
 
+// ── collapsible column groups ─────────────────────────────────────────────────
+const SIZING_KEYS = new Set([
+  "ups_make","ups_model","ups_kva","actual_load_kva","load_kw",
+  "power_factor","inverter_efficiency","backup_min","cell_chemistry",
+  "ageing_pct","design_margin_pct","dod_margin_pct","derating_pct",
+  "centre_tap","cell_type","ageing_type","backup_time_min",
+]);
+const QUOTATION_KEYS = new Set([
+  "qty_system","rate_system","price_system",
+  "rack1_dim","rack1_qty","rack1_rate","rack1_price",
+  "rack2_dim","rack2_qty","rack2_rate","rack2_price",
+  "cc1_desc","cc1_price","cc2_desc","cc2_price","cc3_desc","cc3_price",
+  "cc4_desc","cc4_price","cc5_desc","cc5_price",
+]);
+const OTHER_KEYS = new Set([
+  "datasheet","sizing_sheet","gad","battery_compliance","warranty","dollar_rate",
+]);
+
+// ── inquiry code row colours ──────────────────────────────────────────────────
+// 5 muted tints at ~7% opacity — readable in both light and dark mode
+const CODE_COLORS = [
+  "bg-blue-500/[0.07]",
+  "bg-violet-500/[0.07]",
+  "bg-emerald-500/[0.07]",
+  "bg-amber-500/[0.07]",
+  "bg-rose-500/[0.07]",
+];
+
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function InquiryPage() {
@@ -115,6 +143,9 @@ export default function InquiryPage() {
   const [filterValues, setFilterValues] = useState<FilterValues>({});
   const [page, setPage] = useState(1);
   const [jumpVal, setJumpVal] = useState("");
+  const [sizingCollapsed, setSizingCollapsed] = useState(false);
+  const [quotationCollapsed, setQuotationCollapsed] = useState(false);
+  const [otherCollapsed, setOtherCollapsed] = useState(false);
 
   const globalSearch = filterValues[GLOBAL_KEY] ?? "";
   const activeCount  = Object.entries(filterValues).filter(([k, v]) => k !== GLOBAL_KEY && !!v).length;
@@ -141,6 +172,29 @@ export default function InquiryPage() {
   const entries: any[]  = pageData?.rows  ?? [];
   const totalPages: number = pageData?.pages ?? 1;
   const totalCount: number = pageData?.total ?? 0;
+
+  const visibleCols = useMemo(() =>
+    COLS.filter(c =>
+      !(sizingCollapsed && SIZING_KEYS.has(c.key)) &&
+      !(quotationCollapsed && QUOTATION_KEYS.has(c.key)) &&
+      !(otherCollapsed && OTHER_KEYS.has(c.key))
+    ),
+    [sizingCollapsed, quotationCollapsed, otherCollapsed]
+  );
+  const visibleTotalW = visibleCols.reduce((s, c) => s + c.width, 0) + 40;
+
+  const codeColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    let idx = 0;
+    for (const row of entries) {
+      const code = row.inquiry_code?.trim();
+      if (code && !map.has(code)) {
+        map.set(code, CODE_COLORS[idx % CODE_COLORS.length]);
+        idx++;
+      }
+    }
+    return map;
+  }, [entries]);
 
   const { data: me } = useQuery({
     queryKey: ["me"],
@@ -387,25 +441,38 @@ export default function InquiryPage() {
           disabled={page >= totalPages}
           onClick={() => setPage(p => p + 1)}
         >Next →</Button>
+        <div className="flex-1" />
+        <button className={cn("text-xs px-1.5 hover:text-foreground transition-colors", sizingCollapsed ? "text-foreground font-medium" : "text-muted-foreground")}
+          onClick={() => setSizingCollapsed(v => !v)}>
+          {sizingCollapsed ? `Show Sizing (${SIZING_KEYS.size} hidden)` : "Collapse Sizing"}
+        </button>
+        <button className={cn("text-xs px-1.5 hover:text-foreground transition-colors", quotationCollapsed ? "text-foreground font-medium" : "text-muted-foreground")}
+          onClick={() => setQuotationCollapsed(v => !v)}>
+          {quotationCollapsed ? `Show Quotation (${QUOTATION_KEYS.size} hidden)` : "Collapse Quotation"}
+        </button>
+        <button className={cn("text-xs px-1.5 hover:text-foreground transition-colors", otherCollapsed ? "text-foreground font-medium" : "text-muted-foreground")}
+          onClick={() => setOtherCollapsed(v => !v)}>
+          {otherCollapsed ? `Show Other (${OTHER_KEYS.size} hidden)` : "Collapse Other"}
+        </button>
       </div>
 
       {/* ── table ── */}
       <div className="flex-1 overflow-auto">
-        <table className="border-collapse text-xs" style={{ minWidth: TOTAL_W }}>
+        <table className="border-collapse text-xs" style={{ minWidth: visibleTotalW }}>
           <thead className="sticky top-0 z-20">
             <tr className="bg-muted">
-              {COLS.map(col => (
+              {visibleCols.map(col => (
                 <th key={col.key}
-                  className="border border-muted px-2 py-2 text-left font-semibold whitespace-nowrap"
+                  className="border border-slate-300 dark:border-muted px-2 py-2 text-left font-semibold whitespace-nowrap"
                   style={{ width: col.width, minWidth: col.width }}>
                   {col.label}
                 </th>
               ))}
-              <th className="border border-muted px-2 py-2 text-xs font-semibold whitespace-nowrap" style={{ width: 90, minWidth: 90 }}>Create PO</th>
-              {isExpert && <th className="border border-muted px-1 py-2" style={{ width: 40, minWidth: 40 }} />}
+              <th className="border border-slate-300 dark:border-muted px-2 py-2 text-xs font-semibold whitespace-nowrap" style={{ width: 90, minWidth: 90 }}>Create PO</th>
+              {isExpert && <th className="border border-slate-300 dark:border-muted px-1 py-2" style={{ width: 40, minWidth: 40 }} />}
             </tr>
             <FilterRow
-              cols={COLS}
+              cols={visibleCols}
               values={filterValues}
               onField={setField}
               prefixCells={[]}
@@ -418,15 +485,17 @@ export default function InquiryPage() {
           <tbody>
             {entries.length === 0 && (
               <tr>
-                <td colSpan={COLS.length + (isExpert ? 2 : 1)}
+                <td colSpan={visibleCols.length + (isExpert ? 2 : 1)}
                   className="text-center text-muted-foreground py-12 text-sm">
                   No entries yet
                 </td>
               </tr>
             )}
-            {entries.map((row: any) => (
-              <tr key={row._id} className="hover:bg-muted/30 group">
-                {COLS.map(col => {
+            {entries.map((row: any) => {
+              const rowColor = row.inquiry_code?.trim() ? codeColorMap.get(row.inquiry_code.trim()) ?? "" : "";
+              return (
+              <tr key={row._id} className={cn("hover:bg-muted/40 group", rowColor)}>
+                {visibleCols.map(col => {
                   const val = String(row[col.key] ?? "");
                   const isEditing = editing?.id === row._id && editing?.key === col.key;
                   const canEdit = isExpert;
@@ -434,7 +503,7 @@ export default function InquiryPage() {
                   if (col.type === "yn") {
                     return (
                       <td key={col.key}
-                        className={cn("border border-muted px-1 py-1 text-center select-none", canEdit && "cursor-pointer")}
+                        className={cn("border border-slate-300 dark:border-muted px-1 py-1 text-center select-none", canEdit && "cursor-pointer")}
                         onClick={() => canEdit && toggleYN(row._id, col.key, val)}>
                         <span className={cn(
                           "inline-block px-1.5 py-0.5 rounded text-xs font-medium",
@@ -450,7 +519,7 @@ export default function InquiryPage() {
 
                   return (
                     <td key={col.key}
-                      className={cn("border border-muted px-0 py-0 relative", canEdit && "cursor-text")}
+                      className={cn("border border-slate-300 dark:border-muted px-0 py-0 relative", canEdit && "cursor-text")}
                       onClick={() => canEdit && col.key !== "handled_by" && !isEditing && startEdit(row._id, col.key, val)}>
                       {isEditing ? (
                         <input
@@ -484,7 +553,7 @@ export default function InquiryPage() {
                 })}
 
                 {/* create PO button */}
-                <td className="border border-muted px-1 py-1 text-center">
+                <td className="border border-slate-300 dark:border-muted px-1 py-1 text-center">
                   <button
                     className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-primary border border-primary/40 hover:bg-primary/10"
                     title="Create PO"
@@ -497,7 +566,7 @@ export default function InquiryPage() {
 
                 {/* delete button — experts only */}
                 {isExpert && (
-                  <td className="border border-muted px-1 py-1 text-center">
+                  <td className="border border-slate-300 dark:border-muted px-1 py-1 text-center">
                     {confirmDelete === String(row.sr_no) ? (
                       <div className="flex items-center gap-1 justify-center">
                         <button
@@ -520,7 +589,8 @@ export default function InquiryPage() {
                   </td>
                 )}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
