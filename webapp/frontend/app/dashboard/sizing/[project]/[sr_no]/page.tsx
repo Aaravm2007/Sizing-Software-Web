@@ -208,7 +208,7 @@ export default function SizingFormPage() {
   const isDirty = useRef(false);
   const isAutoSave = useRef(false);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "required">("idle");
 
   const { data: existing, isLoading } = useQuery({
     queryKey: ["sizing", projectName, srNo],
@@ -325,6 +325,11 @@ export default function SizingFormPage() {
 
   useEffect(() => {
     if (!isDirty.current) return;
+    if (!form.customer_name.trim() || !form.solution_provider.trim()) {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+      setAutoSaveStatus("required");
+      return;
+    }
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     setAutoSaveStatus("saving");
     autoSaveTimer.current = setTimeout(() => {
@@ -567,7 +572,18 @@ setAddToQuoteOpen(false);
         <h1 className="text-2xl font-bold">{projectName} — Sr. {srNo}</h1>
         {autoSaveStatus === "saving" && <span className="text-xs text-muted-foreground">Saving…</span>}
         {autoSaveStatus === "saved" && <span className="text-xs text-green-600">Saved</span>}
-        <Button onClick={() => { isDirty.current = true; saveMut.mutate(); }} disabled={saveMut.isPending}>Save</Button>
+        {autoSaveStatus === "required" && <span className="text-xs text-amber-500">Customer Name &amp; Solution Provider are required</span>}
+        <Button
+          onClick={() => {
+            if (!form.customer_name.trim() || !form.solution_provider.trim()) {
+              setAutoSaveStatus("required");
+              return;
+            }
+            isDirty.current = true;
+            saveMut.mutate();
+          }}
+          disabled={saveMut.isPending}
+        >Save</Button>
       </div>
 
       <div className="grid grid-cols-2 gap-6">
@@ -575,11 +591,19 @@ setAddToQuoteOpen(false);
         {/* ── LEFT: Header + Given Technical Info (rows 4-8) ── */}
         <div className="flex flex-col gap-3 border rounded-md p-4">
           <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">Customer Info</h2>
-          <Row label="Customer Name">
-            <Input value={form.customer_name} onChange={set("customer_name")} />
+          <Row label="Customer Name *">
+            <Input
+              value={form.customer_name}
+              onChange={set("customer_name")}
+              className={!form.customer_name.trim() ? "border-red-400 focus-visible:ring-red-400" : ""}
+            />
           </Row>
-          <Row label="Solution Provider">
-            <Input value={form.solution_provider} onChange={set("solution_provider")} />
+          <Row label="Solution Provider *">
+            <Input
+              value={form.solution_provider}
+              onChange={set("solution_provider")}
+              className={!form.solution_provider.trim() ? "border-red-400 focus-visible:ring-red-400" : ""}
+            />
           </Row>
 
           <div className="border-t my-1" />
