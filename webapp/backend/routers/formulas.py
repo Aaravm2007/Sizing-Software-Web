@@ -198,7 +198,7 @@ def list_cell_voltages(_=Depends(get_current_user)):
 
 
 @router.post("/cell-voltages", status_code=201)
-def create_cell_voltage(body: CellVoltageIn, _=Depends(get_admin_user)):
+def create_cell_voltage(body: CellVoltageIn, _=Depends(get_expert_user)):
     try:
         with _conn() as con:
             con.execute(
@@ -212,7 +212,7 @@ def create_cell_voltage(body: CellVoltageIn, _=Depends(get_admin_user)):
 
 
 @router.put("/cell-voltages/{chemistry}")
-def update_cell_voltage(chemistry: str, body: CellVoltageIn, _=Depends(get_admin_user)):
+def update_cell_voltage(chemistry: str, body: CellVoltageIn, _=Depends(get_expert_user)):
     with _conn() as con:
         cur = con.execute(
             "UPDATE cell_voltages SET nominal=?, max_v=?, end_v=? WHERE chemistry=?",
@@ -225,7 +225,7 @@ def update_cell_voltage(chemistry: str, body: CellVoltageIn, _=Depends(get_admin
 
 
 @router.delete("/cell-voltages/{chemistry}")
-def delete_cell_voltage(chemistry: str, _=Depends(get_admin_user)):
+def delete_cell_voltage(chemistry: str, _=Depends(get_expert_user)):
     with _conn() as con:
         cur = con.execute("DELETE FROM cell_voltages WHERE chemistry=?", (chemistry.upper(),))
         con.commit()
@@ -244,7 +244,7 @@ def list_dc_cells(_=Depends(get_current_user)):
 
 
 @router.post("/dc-cells", status_code=201)
-def create_dc_cell(body: DcCellIn, _=Depends(get_admin_user)):
+def create_dc_cell(body: DcCellIn, _=Depends(get_expert_user)):
     try:
         with _conn() as con:
             con.execute("INSERT INTO dc_to_cells VALUES (?,?)", (body.dc_voltage, body.num_cells))
@@ -255,7 +255,7 @@ def create_dc_cell(body: DcCellIn, _=Depends(get_admin_user)):
 
 
 @router.put("/dc-cells/{dc_voltage}")
-def update_dc_cell(dc_voltage: int, body: DcCellIn, _=Depends(get_admin_user)):
+def update_dc_cell(dc_voltage: int, body: DcCellIn, _=Depends(get_expert_user)):
     with _conn() as con:
         cur = con.execute(
             "UPDATE dc_to_cells SET num_cells=? WHERE dc_voltage=?",
@@ -268,7 +268,7 @@ def update_dc_cell(dc_voltage: int, body: DcCellIn, _=Depends(get_admin_user)):
 
 
 @router.delete("/dc-cells/{dc_voltage}")
-def delete_dc_cell(dc_voltage: int, _=Depends(get_admin_user)):
+def delete_dc_cell(dc_voltage: int, _=Depends(get_expert_user)):
     with _conn() as con:
         cur = con.execute("DELETE FROM dc_to_cells WHERE dc_voltage=?", (dc_voltage,))
         con.commit()
