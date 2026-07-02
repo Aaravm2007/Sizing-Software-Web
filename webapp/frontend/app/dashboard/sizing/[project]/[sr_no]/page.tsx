@@ -759,7 +759,15 @@ setAddToQuoteOpen(false);
             <div className="col-span-2 flex flex-col gap-2">
               <div className="flex justify-end">
                 <Button size="sm" variant="secondary"
-                  onClick={handlePreviewCosting} disabled={previewLoading}>
+                  onClick={() => {
+                    if (!form.customer_name.trim() || !form.solution_provider.trim()) {
+                      toast.warning("Customer Name and Solution Provider are mandatory before selecting costing.");
+                      setAutoSaveStatus("required");
+                      return;
+                    }
+                    handlePreviewCosting();
+                  }}
+                  disabled={previewLoading}>
                   {previewLoading ? "Loading…" : "Select Costing"}
                 </Button>
               </div>
