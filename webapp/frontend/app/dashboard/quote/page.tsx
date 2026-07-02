@@ -8,7 +8,7 @@ import { api , apiErr } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Copy, Download, X } from "lucide-react";
+import { Copy, Download, Search, X } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -45,6 +45,7 @@ export default function QuotePage() {
   const [exportTargetCode, setExportTargetCode] = useState("");
   const [exportFmt, setExportFmt] = useState<"word" | "pdf">("word");
   const [pendingLinkOpen, setPendingLinkOpen] = useState(false);
+  const [dlSearch, setDlSearch] = useState("");
   const [pendingExportData, setPendingExportData] = useState<Record<string, string>>({});
   const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
@@ -288,9 +289,23 @@ export default function QuotePage() {
       </Dialog>
 
       {/* Download from Firebase Dialog */}
-      <Dialog open={dlOpen} onOpenChange={setDlOpen}>
+      <Dialog open={dlOpen} onOpenChange={(o) => { setDlOpen(o); if (!o) setDlSearch(""); }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Download Quote from Firebase</DialogTitle></DialogHeader>
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <Input
+              value={dlSearch}
+              onChange={(e) => setDlSearch(e.target.value)}
+              placeholder="Search code, customer, provider…"
+              className="pl-7 h-8 text-sm"
+            />
+            {dlSearch && (
+              <button onClick={() => setDlSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X size={13} />
+              </button>
+            )}
+          </div>
           <div className="overflow-auto max-h-96 border rounded-md">
             <table className="table-grid w-full text-sm">
               <thead className="bg-muted sticky top-0">
@@ -304,16 +319,30 @@ export default function QuotePage() {
               <tbody>
                 {fbLoading && <tr><td colSpan={4} className="text-center py-6 text-muted-foreground">Loading…</td></tr>}
                 {!fbLoading && fbQuotes.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-muted-foreground">No quotes in Firebase</td></tr>}
-                {fbQuotes.map((q: any) => (
-                  <tr key={q.code}
-                    className="cursor-pointer hover:bg-accent"
-                    onDoubleClick={() => downloadMut.mutate(q.code)}>
-                    <td className="text-center py-2 px-3">{q.code}</td>
-                    <td className="text-center py-2 px-3">{q.date}</td>
-                    <td className="text-center py-2 px-3">{q.customer_name}</td>
-                    <td className="text-center py-2 px-3">{q.solution_provider}</td>
-                  </tr>
-                ))}
+                {!fbLoading && fbQuotes.length > 0 && (() => {
+                  const q = dlSearch.toLowerCase().trim();
+                  const visible = q
+                    ? fbQuotes.filter((r: any) =>
+                        (r.code ?? "").toLowerCase().includes(q) ||
+                        (r.date ?? "").toLowerCase().includes(q) ||
+                        (r.customer_name ?? "").toLowerCase().includes(q) ||
+                        (r.solution_provider ?? "").toLowerCase().includes(q)
+                      )
+                    : fbQuotes;
+                  if (visible.length === 0) return (
+                    <tr><td colSpan={4} className="text-center py-6 text-muted-foreground">No results match "{dlSearch}"</td></tr>
+                  );
+                  return visible.map((r: any) => (
+                    <tr key={r.code}
+                      className="cursor-pointer hover:bg-accent"
+                      onDoubleClick={() => downloadMut.mutate(r.code)}>
+                      <td className="text-center py-2 px-3">{r.code}</td>
+                      <td className="text-center py-2 px-3">{r.date}</td>
+                      <td className="text-center py-2 px-3">{r.customer_name}</td>
+                      <td className="text-center py-2 px-3">{r.solution_provider}</td>
+                    </tr>
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
