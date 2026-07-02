@@ -95,7 +95,9 @@ export function runCalculation(
     nominalDcVoltage: number; backupRequirementMin: number;
     ageingPct: number; designMarginPct: number; dodMarginPct: number;
     deratingPct: number; cellChemistry: string; nearestCapacity: number;
-  }
+  },
+  dcMap?: Record<number, number>,
+  cellVMap?: Record<string, { nominal: number; max: number; end: number }>
 ): SizingOutputs {
   const { actualKw, actualKva, upsKva, powerFactor, inverterEfficiency,
     nominalDcVoltage, backupRequirementMin, ageingPct, designMarginPct,
@@ -103,10 +105,15 @@ export function runCalculation(
 
   const r1 = (v: number) => Math.round(v * 10) / 10;
 
+  const resolvedDcMap = dcMap ?? DC_TO_CELLS;
+  const resolvedCellVMap = cellVMap ?? CELL_VOLTAGES;
+
   // Full-precision chain — round only at the return boundary, matching old-app behaviour
   const load    = SizingEngine.calculateLoad(actualKw, actualKva, upsKva, powerFactor, inverterEfficiency);
-  const cells   = SizingEngine.numberOfCells(nominalDcVoltage);
-  const { maxChargeVoltage, endCellVoltage } = SizingEngine.voltageValues(cells, cellChemistry);
+  const cells   = resolvedDcMap[nominalDcVoltage] ?? 0;
+  const cellData = resolvedCellVMap[cellChemistry] ?? resolvedCellVMap.LFP ?? { nominal: 3.2, max: 3.6, end: 2.8 };
+  const maxChargeVoltage = Math.round(cells * cellData.max * 10) / 10;
+  const endCellVoltage   = Math.round(cells * cellData.end * 10) / 10;
   const energy  = (load * backupRequirementMin) / 60;
   const capBase = endCellVoltage ? (energy * 1000) / endCellVoltage : 0;
   const capAge  = capBase * (1 + ageingPct / 100);

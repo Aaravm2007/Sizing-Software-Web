@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
-const DC_VOLTAGES = [12, 24, 36, 48, 72, 96, 120, 144, 192, 240, 336, 360, 384, 408, 480, 512, 528, 576];
+const DC_VOLTAGES_FALLBACK = [12, 24, 36, 48, 72, 96, 120, 144, 192, 240, 336, 360, 384, 408, 480, 512, 528, 576];
 const CHEMISTRIES = ["LFP"];
 const QUOTE_FORMATS = ["High voltage","Low voltage","Extended Warranty High Voltage","Extended Warranty Low Voltage","Low & High Voltage Export"];
 const EXTENDED_FORMATS = new Set(["Extended Warranty High Voltage","Extended Warranty Low Voltage"]);
@@ -217,6 +217,33 @@ export default function SizingFormPage() {
     retry: false,
   });
 
+  const { data: dcCellsData } = useQuery({
+    queryKey: ["dc-cells"],
+    queryFn: () => api.get("/api/formulas/dc-cells").then((r) => r.data as { dc_voltage: number; num_cells: number }[]),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: cellVoltagesData } = useQuery({
+    queryKey: ["cell-voltages"],
+    queryFn: () => api.get("/api/formulas/cell-voltages").then((r) => r.data as { chemistry: string; nominal: number; max_v: number; end_v: number }[]),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const dcMap: Record<number, number> = useMemo(
+    () => dcCellsData ? Object.fromEntries(dcCellsData.map((r) => [r.dc_voltage, r.num_cells])) : {},
+    [dcCellsData]
+  );
+
+  const cellVMap = useMemo(
+    () => cellVoltagesData ? Object.fromEntries(cellVoltagesData.map((r) => [r.chemistry, { nominal: r.nominal, max: r.max_v, end: r.end_v }])) : {},
+    [cellVoltagesData]
+  );
+
+  const dcVoltages = useMemo(
+    () => dcCellsData ? dcCellsData.map((r) => r.dc_voltage).sort((a, b) => a - b) : DC_VOLTAGES_FALLBACK,
+    [dcCellsData]
+  );
+
   useEffect(() => {
     if (!existing) return;
     isDirty.current = false;
@@ -270,7 +297,7 @@ export default function SizingFormPage() {
       deratingPct: n(f.derating_factor_percent),
       cellChemistry: f.cell_chemistry,
       nearestCapacity: n(f.nearest_capacity_ah),
-    });
+    }, Object.keys(dcMap).length ? dcMap : undefined, Object.keys(cellVMap).length ? cellVMap : undefined);
     return {
       ...f,
       calculated_load_kw: s(o.calculatedLoadKw),
@@ -287,7 +314,7 @@ export default function SizingFormPage() {
       total_available_energy_kwh: s(o.totalAvailableEnergyKwh),
       backup_time_min: s(o.backupTimeMin),
     };
-  }, []);
+  }, [dcMap, cellVMap]);
 
   useEffect(() => {
     const sig = INPUT_TRIGGER_KEYS.map((k) => form[k]).join("|");
@@ -585,7 +612,7 @@ setAddToQuoteOpen(false);
               value={form.nominal_dc_voltage}
               onChange={set("nominal_dc_voltage")}
             >
-              {DC_VOLTAGES.map((v) => <option key={v} value={v}>{v}V</option>)}
+              {dcVoltages.map((v) => <option key={v} value={v}>{v}V</option>)}
             </select>
           </Row>
           <Row label="Backup Requirement (Min)">
