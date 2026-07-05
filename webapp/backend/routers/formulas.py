@@ -1,4 +1,3 @@
-import math
 import sqlite3
 import sys
 from pathlib import Path
@@ -49,42 +48,6 @@ DEFAULT_MODULAR_RACKS = [
     ("W=600*D=1400*H=1882", 70000.0),
 ]
 
-# name, expression, description, sort_order
-DEFAULT_SIZING_FORMULAS = [
-    ("load",
-     "actual_kw / inverter_eff if actual_kw > 0 else (actual_kva * power_factor / inverter_eff if actual_kva > 0 else ups_kva * power_factor / inverter_eff)",
-     "Calculated Load (kW)", 1),
-    ("max_charging_voltage",
-     "num_cells * cell_max",
-     "Max Charging Voltage (V)", 2),
-    ("end_cell_voltage",
-     "num_cells * cell_end",
-     "End Cell Voltage (V)", 3),
-    ("energy_required",
-     "(load * backup_minutes) / 60",
-     "Energy Required (kWh)", 4),
-    ("capacity_required",
-     "(energy_required * 1000) / end_cell_voltage if end_cell_voltage > 0 else 0",
-     "Capacity Required (Ah)", 5),
-    ("cap_with_ageing",
-     "capacity_required * (1 + ageing_percent / 100)",
-     "Cap req w/ Ageing (Ah)", 6),
-    ("cap_with_design_margin",
-     "cap_with_ageing * (1 + design_margin_percent / 100)",
-     "Cap req w/ Design Margin (Ah)", 7),
-    ("cap_with_dod",
-     "cap_with_design_margin / (dod_margin_percent / 100) if dod_margin_percent > 0 else cap_with_design_margin",
-     "Cap req w/ DOD Margin (Ah)", 8),
-    ("cap_with_derating",
-     "cap_with_dod * (1 + derating_factor_percent / 100)",
-     "Cap req w/ Derating (Ah)", 9),
-    ("backup_time",
-     "floor((backup_minutes / cap_with_derating) * nearest_capacity) if cap_with_derating > 0 else 0",
-     "Backup Time (Min)", 10),
-    ("total_energy",
-     "(nominal_dc_voltage * nearest_capacity) / 1000",
-     "Total Available Energy (kWh)", 11),
-]
 
 # ── db helpers ─────────────────────────────────────────────────────────────────
 
@@ -110,23 +73,10 @@ def _init():
                 num_cells   INTEGER NOT NULL
             )
         """)
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS sizing_formulas (
-                name        TEXT PRIMARY KEY,
-                expression  TEXT NOT NULL,
-                description TEXT,
-                sort_order  INTEGER
-            )
-        """)
         if not con.execute("SELECT 1 FROM cell_voltages LIMIT 1").fetchone():
             con.executemany("INSERT INTO cell_voltages VALUES (?,?,?,?)", DEFAULT_CELL_VOLTAGES)
         if not con.execute("SELECT 1 FROM dc_to_cells LIMIT 1").fetchone():
             con.executemany("INSERT INTO dc_to_cells VALUES (?,?)", DEFAULT_DC_TO_CELLS)
-        if not con.execute("SELECT 1 FROM sizing_formulas LIMIT 1").fetchone():
-            con.executemany(
-                "INSERT INTO sizing_formulas VALUES (?,?,?,?)",
-                DEFAULT_SIZING_FORMULAS,
-            )
         con.execute("""
             CREATE TABLE IF NOT EXISTS quote_rates (
                 key         TEXT PRIMARY KEY,
@@ -148,31 +98,6 @@ def _init():
 
 
 _init()
-
-# ── safe formula eval ─────────────────────────────────────────────────────────
-
-_MATH_NS = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
-_MATH_NS.update({"abs": abs, "round": round, "int": int, "float": float,
-                 "min": min, "max": max})
-
-
-def eval_formula(expression: str, ctx: dict) -> float:
-    ns = {**_MATH_NS, **ctx}
-    try:
-        result = eval(compile(expression, "<formula>", "eval"), {"__builtins__": {}}, ns)
-        return float(result)
-    except Exception as e:
-        raise ValueError(f"Formula error ({expression!r}): {e}")
-
-
-def load_sizing_formulas() -> dict:
-    """Return {name: expression} ordered by sort_order."""
-    with _conn() as con:
-        rows = con.execute(
-            "SELECT name, expression FROM sizing_formulas ORDER BY sort_order"
-        ).fetchall()
-    return {r["name"]: r["expression"] for r in rows}
-
 
 # ── schemas ────────────────────────────────────────────────────────────────────
 

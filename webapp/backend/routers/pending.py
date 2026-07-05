@@ -511,9 +511,12 @@ def link_exports(body: LinkBody, user=Depends(get_current_user)):
     db_path = get_user_pending_db(user["username"])
     for item in body.links:
         try:
+            all_exps = list_exports(item.pending_code, db_path)
+            target = next((e for e in all_exps if e["id"] == item.export_id), None)
+            if not target or target.get("export_type", "").startswith("quote_"):
+                continue
             update_export_sol_no(item.pending_code, item.export_id, item.sol_no, db_path)
             # find latest quote export for this sol_no → set as parent
-            all_exps = list_exports(item.pending_code, db_path)
             parents = [
                 e for e in all_exps
                 if e.get("export_type", "").startswith("quote_")

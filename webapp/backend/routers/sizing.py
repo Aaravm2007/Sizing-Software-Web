@@ -19,9 +19,7 @@ from sql_handler import (
     duplicate_sizing,
 )
 from auth import get_current_user
-from routers.formulas import load_sizing_formulas, eval_formula, DB_PATH as FORMULAS_DB
 from user_db import get_user_sizing_db
-import sqlite3 as _sqlite3
 
 router = APIRouter()
 
@@ -62,21 +60,6 @@ class SizingData(BaseModel):
     total_available_energy_kwh: float = 0
     backup_time_min: float = 0
     ageing_type: str = "BOL"
-
-class CalcRequest(BaseModel):
-    actual_kw: float = 0
-    actual_kva: float = 0
-    ups_kva: float = 0
-    power_factor: float = 0
-    inverter_efficiency: float = 1
-    nominal_dc_voltage: int = 0
-    backup_minutes: float = 0
-    ageing_percent: float = 0
-    design_margin_percent: float = 0
-    dod_margin_percent: float = 0
-    derating_factor_percent: float = 0
-    cell_chemistry: str = "LFP"
-    nearest_capacity: float = 0
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -630,94 +613,6 @@ def export_pdf(name: str, sr_no: Optional[int] = None, _=Depends(get_current_use
         raise HTTPException(500, str(e))
     fname = f"{name}_sizing{'_'+str(sr_no) if sr_no else '_all'}.pdf"
     return FileResponse(pdf_path, media_type="application/pdf", filename=fname)
-
-
-# ── stateless calculate ───────────────────────────────────────────────────────
-
-def _load_cell_voltages() -> dict:
-    try:
-        con = _sqlite3.connect(str(FORMULAS_DB))
-        con.row_factory = _sqlite3.Row
-        rows = con.execute("SELECT * FROM cell_voltages").fetchall()
-        con.close()
-        return {r["chemistry"]: {"nominal": r["nominal"], "max": r["max_v"], "end": r["end_v"]} for r in rows}
-    except Exception:
-        return {"LFP": {"nominal": 3.2, "max": 3.6, "end": 2.8}, "NPM": {"nominal": 3.6, "max": 4.2, "end": 3.0}}
-
-
-def _load_dc_cells() -> dict:
-    try:
-        con = _sqlite3.connect(str(FORMULAS_DB))
-        con.row_factory = _sqlite3.Row
-        rows = con.execute("SELECT * FROM dc_to_cells").fetchall()
-        con.close()
-        return {r["dc_voltage"]: r["num_cells"] for r in rows}
-    except Exception:
-        return {12:4, 24:8, 36:11, 48:15, 72:23, 96:30, 120:38, 144:45, 192:60, 240:75,
-                336:105, 360:112, 384:120, 408:128, 480:150, 512:160, 528:165, 576:180}
-
-
-@router.post("/calculate")
-def calculate(b: CalcRequest, _=Depends(get_current_user)):
-    cell_voltages = _load_cell_voltages()
-    dc_cells      = _load_dc_cells()
-    formulas      = load_sizing_formulas()
-
-    cells = dc_cells.get(int(b.nominal_dc_voltage), 0)
-    chem  = cell_voltages.get(b.cell_chemistry, cell_voltages.get("LFP", {"nominal": 3.2, "max": 3.6, "end": 2.8}))
-
-    ctx = {
-        "actual_kw":              b.actual_kw,
-        "actual_kva":             b.actual_kva,
-        "ups_kva":                b.ups_kva,
-        "power_factor":           b.power_factor,
-        "inverter_eff":           b.inverter_efficiency or 1,
-        "nominal_dc_voltage":     b.nominal_dc_voltage,
-        "backup_minutes":         b.backup_minutes,
-        "ageing_percent":         b.ageing_percent,
-        "design_margin_percent":  b.design_margin_percent,
-        "dod_margin_percent":     b.dod_margin_percent,
-        "derating_factor_percent": b.derating_factor_percent,
-        "nearest_capacity":       b.nearest_capacity,
-        "num_cells":              cells,
-        "cell_nominal":           chem["nominal"],
-        "cell_max":               chem["max"],
-        "cell_end":               chem["end"],
-    }
-
-    try:
-        for name in ["load", "max_charging_voltage", "end_cell_voltage", "energy_required",
-                     "capacity_required", "cap_with_ageing", "cap_with_design_margin",
-                     "cap_with_dod", "cap_with_derating"]:
-            if name in formulas:
-                ctx[name] = round(eval_formula(formulas[name], ctx), 1)
-
-        if b.nearest_capacity > 0 and ctx.get("cap_with_derating", 0) > 0:
-            for name in ["backup_time", "total_energy"]:
-                if name in formulas:
-                    ctx[name] = eval_formula(formulas[name], ctx)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    result = {
-        "calculated_load_kw":          round(ctx.get("load", 0), 1),
-        "number_of_cells":             cells,
-        "max_charging_voltage":        round(ctx.get("max_charging_voltage", 0), 1),
-        "end_cell_voltage":            round(ctx.get("end_cell_voltage", 0), 1),
-        "energy_required_kwh":         round(ctx.get("energy_required", 0), 1),
-        "capacity_required_ah":        round(ctx.get("capacity_required", 0), 1),
-        "cap_with_ageing_ah":          round(ctx.get("cap_with_ageing", 0), 1),
-        "cap_with_design_margin_ah":   round(ctx.get("cap_with_design_margin", 0), 1),
-        "cap_with_dod_margin_ah":      round(ctx.get("cap_with_dod", 0), 1),
-        "cap_with_derating_factor_ah": round(ctx.get("cap_with_derating", 0), 1),
-    }
-
-    if b.nearest_capacity > 0 and ctx.get("cap_with_derating", 0) > 0:
-        result["backup_time_min"]            = ctx.get("backup_time", 0)
-        result["total_available_energy_kwh"] = ctx.get("total_energy", 0)
-        result["offered_battery_config"]     = f"{int(b.nominal_dc_voltage)}V {int(b.nearest_capacity)}Ah"
-
-    return result
 
 
 # ── record restore ────────────────────────────────────────────────────────────

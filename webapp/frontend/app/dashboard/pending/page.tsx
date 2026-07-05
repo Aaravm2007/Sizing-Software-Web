@@ -1263,6 +1263,7 @@ export default function PendingPage() {
             const TYPE_LABEL: Record<string, string> = { quote_word: "Quote (Word)", quote_pdf: "Quote (PDF)", sizing_excel: "Sizing (Excel)", sizing_pdf: "Sizing (PDF)", datasheet: "Datasheet", gad: "GAD" };
             const CHIP_KEY: Record<string, string> = { quote_word: "Quote", quote_pdf: "Quote", sizing_excel: "Sizing", sizing_pdf: "Sizing", datasheet: "Datasheet", gad: "GAD" };
             const DATA_COLS: { key: string; label: string }[] = [
+              { key: "quote_code",          label: "Quote Code"     },
               { key: "exported_by",         label: "By"             },
               { key: "sales_person",        label: "Sales Person"   },
               { key: "solution_provider",   label: "Sol. Provider"  },
@@ -1287,7 +1288,6 @@ export default function PendingPage() {
               { key: "ageing_type",         label: "Ageing Type"    },
               { key: "backup_time_min",     label: "BT min"         },
               { key: "centre_tap",          label: "CT"             },
-              { key: "quote_code",          label: "Quote Code"     },
               { key: "qty_system",          label: "Qty Sys"        },
               { key: "rate_system",         label: "Rate Sys"       },
               { key: "price_system",        label: "Price Sys"      },
@@ -1424,6 +1424,7 @@ export default function PendingPage() {
 
             const SolDropdown = ({ e }: { e: any }) => {
               if (historySource !== "mine" || quoteParents.length === 0) return null;
+              if (e.export_type?.startsWith("quote_")) return null;
               return (
                 <select
                   value={e.sol_no || ""}
@@ -1622,13 +1623,8 @@ export default function PendingPage() {
             );
           })()}
           <DialogFooter className="gap-2 flex-row mt-2">
-            <Button variant="ghost" className="flex-1" onClick={() => {
-              const row = linkDialogRow!;
-              setLinkDialogRow(null); setLinkDialogExports([]); setLinkDialogAllExports([]); setLinkSolMap({});
-              setLinkSizingGroups([]); setLinkSizingMap({});
-              doMarkComplete(row, completeDetails);
-            }}>
-              Skip & Complete
+            <Button variant="ghost" onClick={() => { setLinkDialogRow(null); setLinkDialogExports([]); setLinkDialogAllExports([]); setLinkSolMap({}); setLinkSizingGroups([]); setLinkSizingMap({}); }}>
+              Cancel
             </Button>
             <Button className="flex-1" onClick={handleLinkAndComplete} disabled={!!completingId}>
               {completingId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Link & Complete"}
