@@ -400,7 +400,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       )}
 
       <div className="flex flex-wrap items-end gap-4">
-        {isExpert && (<div className="flex flex-col gap-1">
+        {!isGuest && (<div className="flex flex-col gap-1">
           <Label>Battery Configuration</Label>
           <Input
             className="w-72"
@@ -410,7 +410,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
           />
         </div>)}
-        {isExpert && (<div className="flex flex-col gap-1">
+        {!isGuest && (<div className="flex flex-col gap-1">
           <Label>Backup Time (Duration)</Label>
           <select
             className="h-9 rounded-md border px-3 text-sm bg-background w-44"
@@ -421,7 +421,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
             {durations.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
         </div>)}
-        {isExpert && (<Button onClick={handleSearch} disabled={searchMut.isPending}>
+        {!isGuest && (<Button onClick={handleSearch} disabled={searchMut.isPending}>
           Search &amp; Add
         </Button>)}
         {isExpert && (<Button variant="outline" onClick={handleReload} disabled={reloading}>
