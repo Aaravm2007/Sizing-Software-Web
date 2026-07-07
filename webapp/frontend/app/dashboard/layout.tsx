@@ -19,34 +19,34 @@ const NAV_SECTIONS = [
   {
     section: null,
     items: [
-      { label: "Home", href: "/dashboard", icon: Home, expertOnly: false },
+      { label: "Home", href: "/dashboard", icon: Home, expertOnly: false, guestHidden: false },
     ],
   },
   {
     section: "Document Creation",
     items: [
-      { label: "Sizing",    href: "/dashboard/sizing",    icon: BarChart2,  expertOnly: false },
-      { label: "Costing",   href: "/dashboard/costing",   icon: DollarSign, expertOnly: false },
-      { label: "Quote",     href: "/dashboard/quote",     icon: FileText,   expertOnly: false },
-      { label: "Datasheet", href: "/dashboard/datasheet", icon: BookOpen,   expertOnly: false },
-      { label: "GAD",       href: "/dashboard/gad",       icon: Layout,     expertOnly: false },
-      { label: "Wizard",    href: "/dashboard/wizard",    icon: Wand2,      expertOnly: false },
+      { label: "Sizing",    href: "/dashboard/sizing",    icon: BarChart2,  expertOnly: false, guestHidden: false },
+      { label: "Costing",   href: "/dashboard/costing",   icon: DollarSign, expertOnly: false, guestHidden: false },
+      { label: "Quote",     href: "/dashboard/quote",     icon: FileText,   expertOnly: false, guestHidden: false },
+      { label: "Datasheet", href: "/dashboard/datasheet", icon: BookOpen,   expertOnly: false, guestHidden: false },
+      { label: "GAD",       href: "/dashboard/gad",       icon: Layout,     expertOnly: false, guestHidden: false },
+      { label: "Wizard",    href: "/dashboard/wizard",    icon: Wand2,      expertOnly: false, guestHidden: true },
     ],
   },
   {
     section: "Tracking",
     items: [
-      { label: "Approvals",   href: "/dashboard/approvals",   icon: ClipboardCheck, expertOnly: false },
-      { label: "Pending",     href: "/dashboard/pending",     icon: Clock,          expertOnly: false },
-      { label: "Inquiry",     href: "/dashboard/inquiry",     icon: ClipboardList,  expertOnly: false },
-      { label: "PO Tracking", href: "/dashboard/po-tracking", icon: PackageCheck,   expertOnly: false },
+      { label: "Approvals",   href: "/dashboard/approvals",   icon: ClipboardCheck, expertOnly: false, guestHidden: true },
+      { label: "Pending",     href: "/dashboard/pending",     icon: Clock,          expertOnly: false, guestHidden: true },
+      { label: "Inquiry",     href: "/dashboard/inquiry",     icon: ClipboardList,  expertOnly: false, guestHidden: true },
+      { label: "PO Tracking", href: "/dashboard/po-tracking", icon: PackageCheck,   expertOnly: false, guestHidden: true },
     ],
   },
   {
     section: "Admin",
     items: [
-      { label: "Masters", href: "/dashboard/formulas", icon: FlaskConical, expertOnly: true },
-      { label: "Admin",   href: "/dashboard/admin",   icon: ShieldCheck,  expertOnly: true },
+      { label: "Masters", href: "/dashboard/formulas", icon: FlaskConical, expertOnly: true, guestHidden: false },
+      { label: "Admin",   href: "/dashboard/admin",   icon: ShieldCheck,  expertOnly: true, guestHidden: false },
     ],
   },
 ];
@@ -105,7 +105,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <Separator />
         <nav className="flex flex-col gap-0.5 p-2 flex-1 overflow-y-auto">
           {NAV_SECTIONS.map(({ section, items }) => {
-            const visible = items.filter(({ expertOnly }) => !expertOnly || me?.role === "e");
+            const visible = items.filter(({ expertOnly, guestHidden }) =>
+              (!expertOnly || me?.role === "e") && !(guestHidden && me?.role === "g")
+            );
             if (!visible.length) return null;
             return (
               <div key={section ?? "__home"} className="mb-1">

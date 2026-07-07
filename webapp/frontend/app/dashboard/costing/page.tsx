@@ -95,6 +95,35 @@ const MONEY_FIELDS = new Set<keyof CostingRow>([
   "per_kw_cost", "per_kw_profit1", "per_kw_profit2",
 ]);
 
+const USER_VISIBLE_LABELS: [keyof CostingRow, string][] = [
+  ["partcode",      "Battery Partcode"],
+  ["duration",      "Duration"],
+  ["battery_pack",  "Battery Pack"],
+  ["dollar_rate",   "Dollar Rate (INR/USD)"],
+  ["creation_date", "Creation Date"],
+  ["created_by",    "Created By"],
+  ["est_sales_b",   "Cost"],
+  ["bms_pcm_type",  "BMS/PCM"],
+  ["cell_chemistry","LFP/NCM"],
+  ["centre_tap",    "Centre Tap"],
+  ["cell_type",     "Cylindrical/Prismatic"],
+  ["application",   "Application"],
+  ["enclosure",     "Enclosure"],
+  ["mount",         "Mount"],
+  ["brand",         "Brand & Type of Cell"],
+  ["installation",  "Installation"],
+];
+
+function getCostValue(row: CostingRow): number {
+  const pc = (row.partcode ?? "").toUpperCase();
+  if (pc.includes("HVL")) return Number(row.est_sales_b) || 0;
+  if (pc.includes("EFL")) return (Number(row.total_cost) || 0) * 1.06;
+  return Number(row.est_sales_b) || 0;
+}
+
+const USER_BLUE_KEYS = new Set<keyof CostingRow>(["est_sales_b"]);
+const USER_GREEN_KEYS = new Set<keyof CostingRow>(["partcode","duration","battery_pack","dollar_rate","creation_date","created_by"]);
+
 const ROW_LABELS: [keyof CostingRow, string][] = [
   ["partcode", "Battery Partcode"],
   ["duration", "Duration"],
@@ -157,7 +186,7 @@ const ROW_LABELS: [keyof CostingRow, string][] = [
 export default function CostingPage() {
   const router = useRouter();
   const qc = useQueryClient();
-  const { isExpert } = useMe();
+  const { isExpert, isGuest } = useMe();
 
   const [batteryConfig, setBatteryConfig] = useState("");
   const [duration, setDuration] = useState("");
@@ -371,7 +400,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       )}
 
       <div className="flex flex-wrap items-end gap-4">
-        <div className="flex flex-col gap-1">
+        {isExpert && (<div className="flex flex-col gap-1">
           <Label>Battery Configuration</Label>
           <Input
             className="w-72"
@@ -380,8 +409,8 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
             placeholder="e.g. 48V 100Ah"
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
           />
-        </div>
-        <div className="flex flex-col gap-1">
+        </div>)}
+        {isExpert && (<div className="flex flex-col gap-1">
           <Label>Backup Time (Duration)</Label>
           <select
             className="h-9 rounded-md border px-3 text-sm bg-background w-44"
@@ -391,22 +420,24 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
             <option value="">Select…</option>
             {durations.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
-        </div>
-        <Button onClick={handleSearch} disabled={searchMut.isPending}>
+        </div>)}
+        {isExpert && (<Button onClick={handleSearch} disabled={searchMut.isPending}>
           Search &amp; Add
-        </Button>
-        <Button variant="outline" onClick={handleReload} disabled={reloading}>
+        </Button>)}
+        {isExpert && (<Button variant="outline" onClick={handleReload} disabled={reloading}>
           {reloading ? "Reloading…" : "Reload Table"}
-        </Button>
+        </Button>)}
         <Button variant="outline" onClick={() => {
           const qs = fromSizing ? `?from=sizing&back=${encodeURIComponent(backUrl)}` : "";
           router.push(`/dashboard/costing/new${qs}`);
         }}>
           New Costing
         </Button>
+        {isExpert && (
         <Button variant="outline" onClick={() => router.push("/dashboard/costing/mass-update")}>
           Mass Cost Update
         </Button>
+        )}
         {/* COSTING EXPORT DISABLED — do not re-enable without authorisation */}
         {/* <Button variant="outline" onClick={handleExport}>Export Costing</Button> */}
         <Button variant="outline" onClick={async () => {
@@ -476,9 +507,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
               </tr>
             </thead>
             <tbody>
-              {ROW_LABELS.map(([key, label], rowIdx) => {
-                const isBlue = [19, 23, 36, 40].includes(rowIdx + 1);
-                const isGreen = [1, 4, 5, 6].includes(rowIdx + 1);
+              {(isGuest ? USER_VISIBLE_LABELS : ROW_LABELS).map(([key, label], rowIdx) => {
+                const isBlue = isGuest ? USER_BLUE_KEYS.has(key) : [19, 23, 36, 40].includes(rowIdx + 1);
+                const isGreen = isGuest ? USER_GREEN_KEYS.has(key) : [1, 4, 5, 6].includes(rowIdx + 1);
                 const isDiff = TEXT_FIELDS.has(key) && rows.length > 1 &&
                   new Set(rows.map(r => String(r[key] ?? ""))).size > 1;
                 const rowBg = isBlue ? "bg-blue-100 dark:bg-blue-900/40" : isGreen ? "bg-green-100 dark:bg-green-900/40" : isDiff ? "bg-yellow-50 dark:bg-yellow-900/20" : "";
@@ -493,6 +524,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                   </td>
                   {rows.map((row, i) => {
                     const cellDiff = isDiff && String(row[key] ?? "") !== String(rows[0][key] ?? "");
+                    const rawVal = (isGuest && key === "est_sales_b" && label === "Cost")
+                      ? getCostValue(row)
+                      : row[key];
                     return (
                       <td
                         key={i}
@@ -501,7 +535,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                         onClick={() => setSelectedCol(i)}
                         onDoubleClick={() => { setSelectedCol(i); setActionOpen(true); }}
                       >
-                        {MONEY_FIELDS.has(key) ? fmtInr(row[key] as number) : String(row[key] ?? "")}
+                        {MONEY_FIELDS.has(key) ? fmtInr(rawVal as number) : String(rawVal ?? "")}
                       </td>
                     );
                   })}
@@ -566,7 +600,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                   if (!row) return;
                   localStorage.setItem("sizing_selected_costing", JSON.stringify({
                     partcode: row.partcode,
-                    total_cost: Number(row.total_cost) || 0,
+                    total_cost: isGuest ? getCostValue(row) : (Number(row.total_cost) || 0),
                     battery_pack: row.battery_pack,
                     duration: row.duration,
                     cell_type: row.cell_type,

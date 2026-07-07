@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 interface UserProfile {
   username: string;
   email: string;
-  role: "u" | "e";
+  role: "u" | "e" | "g";
   hardcoded: boolean;
 }
 
@@ -30,10 +30,11 @@ interface LogEntry {
   detail: string;
 }
 
-const ROLE_LABEL: Record<string, string> = { u: "User", e: "Expert" };
+const ROLE_LABEL: Record<string, string> = { u: "User", e: "Expert", g: "Guest" };
 const ROLE_COLORS: Record<string, string> = {
   u: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
   e: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  g: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
 };
 
 function fmtUptime(s: number) {
@@ -220,12 +221,12 @@ export default function AdminPage() {
   const [cUsername, setCUsername] = useState("");
   const [cPassword, setCPassword] = useState("");
   const [cEmail, setCEmail] = useState("");
-  const [cRole, setCRole] = useState<"u" | "e">("u");
+  const [cRole, setCRole] = useState<"u" | "e" | "g">("u");
 
   // ── edit user dialog ───────────────────────────────────────────────────
   const [editUser, setEditUser] = useState<UserProfile | null>(null);
   const [eEmail, setEEmail] = useState("");
-  const [eRole, setERole] = useState<"u" | "e">("u");
+  const [eRole, setERole] = useState<"u" | "e" | "g">("u");
   const [ePassword, setEPassword] = useState("");
 
   // ── delete confirm ─────────────────────────────────────────────────────
@@ -327,6 +328,10 @@ export default function AdminPage() {
               <span className="text-2xl font-bold">{users.filter((u) => u.role === "e").length}</span>
               <span className="text-xs text-muted-foreground">Expert users</span>
             </div>
+            <div className="border rounded-md px-5 py-3 flex flex-col">
+              <span className="text-2xl font-bold">{users.filter((u) => u.role === "g").length}</span>
+              <span className="text-xs text-muted-foreground">Guests</span>
+            </div>
           </div>
 
           <div className="border rounded-md overflow-auto">
@@ -400,7 +405,7 @@ export default function AdminPage() {
             <div className="flex flex-col gap-1.5">
               <Label>Role</Label>
               <div className="flex gap-4">
-                {(["u", "e"] as const).map((r) => (
+                {(["u", "e", "g"] as const).map((r) => (
                   <label key={r} className="flex items-center gap-2 cursor-pointer text-sm">
                     <input type="radio" name="create-role" checked={cRole === r} onChange={() => setCRole(r)} />
                     {ROLE_LABEL[r]}
@@ -428,7 +433,7 @@ export default function AdminPage() {
             <div className="flex flex-col gap-1.5">
               <Label>Role</Label>
               <div className="flex gap-4">
-                {(["u", "e"] as const).map((r) => (
+                {(["u", "e", "g"] as const).map((r) => (
                   <label key={r} className="flex items-center gap-2 cursor-pointer text-sm">
                     <input type="radio" name="edit-role" checked={eRole === r} onChange={() => setERole(r)} />
                     {ROLE_LABEL[r]}

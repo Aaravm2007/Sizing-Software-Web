@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 
 export interface Me {
   username: string;
-  role: "u" | "e";
+  role: "u" | "e" | "g";
 }
 
 export function useMe() {
@@ -15,6 +15,7 @@ export function useMe() {
   return {
     me: data ?? null,
     isExpert: data?.role === "e",
+    isGuest: data?.role === "g",
     username: data?.username ?? "",
     isLoading,
   };

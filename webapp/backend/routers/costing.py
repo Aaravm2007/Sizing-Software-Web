@@ -516,7 +516,7 @@ def duplicate_row(row_index: int, user=Depends(get_current_user)):
 
 
 @router.post("/tree/{row_index}/save-to-firebase")
-def save_to_firebase(row_index: int, user=Depends(get_current_user)):
+def save_to_firebase(row_index: int, user=Depends(get_expert_user)):
     db = get_user_costing_db(user["username"])
     _ensure_tree(db)
     conn = _get_conn(db)
@@ -700,7 +700,7 @@ class SnapshotLoad(BaseModel):
 
 
 @router.post("/load-snapshot")
-def load_snapshot(body: SnapshotLoad, user=Depends(get_current_user)):
+def load_snapshot(body: SnapshotLoad, user=Depends(get_expert_user)):
     """Clear tree and load rows from a project file snapshot."""
     import json as _json
     try:
