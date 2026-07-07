@@ -346,19 +346,11 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
   const [reloading, setReloading] = useState(false);
   const handleReload = async () => {
-    if (!batteryConfig.trim() || !duration.trim()) {
-      toast.warning("Enter Battery Configuration and select Duration");
-      return;
-    }
     setReloading(true);
     try {
-      await api.delete("/api/costing/tree");
-      await api.post("/api/costing/tree/search", { duration, keyword: batteryConfig });
-      qc.invalidateQueries({ queryKey: ["costing-tree"] });
+      await qc.invalidateQueries({ queryKey: ["costing-tree"] });
       setSelectedCol(null);
-      toast.success("Costing table reloaded");
-    } catch (e: any) {
-      toast.error(apiErr(e, "Reload failed"));
+      toast.success("Table refreshed");
     } finally {
       setReloading(false);
     }
@@ -424,9 +416,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         {!isGuest && (<Button onClick={handleSearch} disabled={searchMut.isPending}>
           Search &amp; Add
         </Button>)}
-        {isExpert && (<Button variant="outline" onClick={handleReload} disabled={reloading}>
+        <Button variant="outline" onClick={handleReload} disabled={reloading}>
           {reloading ? "Reloading…" : "Reload Table"}
-        </Button>)}
+        </Button>
         <Button variant="outline" onClick={() => {
           const qs = fromSizing ? `?from=sizing&back=${encodeURIComponent(backUrl)}` : "";
           router.push(`/dashboard/costing/new${qs}`);
