@@ -264,6 +264,7 @@ export default function PendingPage() {
   const [historySource, setHistorySource] = useState<"mine" | "full">("mine");
   const [globalActionRow, setGlobalActionRow] = useState<PendingRow | null>(null);
   const [restoringId, setRestoringId] = useState<number | null>(null);
+  const [deleteExportId, setDeleteExportId] = useState<number | null>(null);
   const [sizingPickerExport, setSizingPickerExport] = useState<any | null>(null);
   const [sizingProject, setSizingProject] = useState("");
   const [completingId, setCompletingId] = useState<number | null>(null);
@@ -677,6 +678,7 @@ export default function PendingPage() {
       qc.invalidateQueries({ queryKey: ["pending-exports", detailCode, historySource] });
       qc.invalidateQueries({ queryKey: ["pending-export-summary"] });
       toast.success("Export entry deleted");
+      setDeleteExportId(null);
     },
     onError: (e: any) => toast.error(apiErr(e, "Failed to delete export")),
   });
@@ -1321,21 +1323,33 @@ export default function PendingPage() {
             // ── build tree ──
             const TYPE_ORDER: Record<string, number> = { quote_word: 0, quote_pdf: 0, sizing_excel: 1, sizing_pdf: 1, datasheet: 2, gad: 3 };
             const byTypeOrder = (a: any, b: any) => (TYPE_ORDER[a.export_type] ?? 9) - (TYPE_ORDER[b.export_type] ?? 9);
-            const solSort = (a: any, b: any) => (parseInt(a.sol_no) || 0) - (parseInt(b.sol_no) || 0);
+            const solSort = (a: any, b: any) => {
+              const aCode = String(a.quote_code || ""), bCode = String(b.quote_code || "");
+              const codeCmp = /^\d+$/.test(aCode) && /^\d+$/.test(bCode)
+                ? parseInt(aCode) - parseInt(bCode)
+                : aCode.localeCompare(bCode);
+              if (codeCmp !== 0) return codeCmp;
+              return (parseInt(a.sol_no) || 0) - (parseInt(b.sol_no) || 0);
+            };
 
             let quoteParents: any[];
             const childrenByParent = new Map<number, any[]>();
             let standalones: any[];
 
-            // dedupe quote exports by sol_no — one parent row per solution,
+            // quote parents are grouped by (quote_code, sol_no) together — sol_no alone
+            // is not unique across different quotes that share the same pending item
+            // (e.g. a real quote and a Wizard "Export as Project" entry can both use sol_no "1")
+            const solKey = (e: { quote_code?: string; sol_no?: string }) => `${e.quote_code || ""}::${e.sol_no || ""}`;
+
+            // dedupe quote exports by (quote_code, sol_no) — one parent row per solution,
             // secondary quote formats (word vs pdf) become children of the primary
             const dedupeQuotes = (allQuotes: any[]): { parents: any[]; extras: Map<string, any[]> } => {
               const seen = new Map<string, any>();
               const extras = new Map<string, any[]>();
               for (const e of allQuotes) {
-                const sol = String(e.sol_no || "");
-                if (!seen.has(sol)) { seen.set(sol, e); }
-                else { if (!extras.has(sol)) extras.set(sol, []); extras.get(sol)!.push(e); }
+                const key = solKey(e);
+                if (!seen.has(key)) { seen.set(key, e); }
+                else { if (!extras.has(key)) extras.set(key, []); extras.get(key)!.push(e); }
               }
               return { parents: Array.from(seen.values()), extras };
             };
@@ -1345,10 +1359,12 @@ export default function PendingPage() {
               const { parents, extras } = dedupeQuotes(allQuotes);
               quoteParents = parents;
               for (const parent of quoteParents) {
-                const sol = String(parent.sol_no || "");
+                const key = solKey(parent);
                 const kids = [
-                  ...(extras.get(sol) ?? []),
-                  ...detailExports.filter((e: any) => !e.export_type?.startsWith("quote_") && e.sol_no === sol),
+                  ...(extras.get(key) ?? []),
+                  ...detailExports.filter((e: any) =>
+                    !e.export_type?.startsWith("quote_") && e.sol_no === parent.sol_no &&
+                    (!e.quote_code || e.quote_code === parent.quote_code)),
                 ].sort(byTypeOrder);
                 if (kids.length) childrenByParent.set(parent.id, kids);
               }
@@ -1365,9 +1381,9 @@ export default function PendingPage() {
               }
               // merge extra quote formats into primary's children
               for (const parent of quoteParents) {
-                const sol = String(parent.sol_no || "");
+                const key = solKey(parent);
                 const existing = childrenByParent.get(parent.id) ?? [];
-                const ex = extras.get(sol) ?? [];
+                const ex = extras.get(key) ?? [];
                 if (ex.length) childrenByParent.set(parent.id, [...ex, ...existing].sort(byTypeOrder));
               }
               for (const [pid, kids] of childrenByParent) childrenByParent.set(pid, [...kids].sort(byTypeOrder));
@@ -1409,7 +1425,7 @@ export default function PendingPage() {
             const DeleteBtn = ({ e }: { e: any }) => (
               <button
                 disabled={deleteExportMut.isPending}
-                onClick={() => { if (confirm("Delete this export entry?")) deleteExportMut.mutate(e.id); }}
+                onClick={() => setDeleteExportId(e.id)}
                 className="text-[11px] font-medium px-2 py-0.5 rounded border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-50 whitespace-nowrap"
               >
                 Delete
@@ -1628,6 +1644,25 @@ export default function PendingPage() {
             </Button>
             <Button className="flex-1" onClick={handleLinkAndComplete} disabled={!!completingId}>
               {completingId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Link & Complete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteExportId !== null} onOpenChange={(o) => { if (!o) setDeleteExportId(null); }}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader><DialogTitle>Delete Export Entry?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This removes the export entry from this pending item&apos;s history. This can&apos;t be undone.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setDeleteExportId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={deleteExportMut.isPending}
+              onClick={() => deleteExportId !== null && deleteExportMut.mutate(deleteExportId)}
+            >
+              {deleteExportMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1001,8 +1001,22 @@ def reorder_items(code: str, body: ReorderReq, user=Depends(get_current_user), s
 
 # ── Export ────────────────────────────────────────────────────────────────────
 
+def _is_project_quote(code: str) -> bool:
+    """True if this quote_code was created by Wizard's 'Export as Project' (metadata-only,
+    no downloadable document). Fails open (returns False) if Firebase is unreachable, so a
+    Firebase hiccup never blocks a normal quote download."""
+    try:
+        from firebase_init import get_db
+        fdb = get_db()
+        return bool(fdb.reference(f"project_quotes/{code}").get())
+    except Exception:
+        return False
+
+
 @router.get("/quotes/{code}/export/word")
 def export_word(code: str, scope: str = Query("regular"), user=Depends(get_current_user)):
+    if _is_project_quote(code):
+        raise HTTPException(409, detail={"type": "project", "redirect": "/dashboard/wizard"})
     tdb = _tdb(user["username"], scope)
     try:
         path = _generate_docx(code, tdb)
@@ -1027,6 +1041,8 @@ def export_word(code: str, scope: str = Query("regular"), user=Depends(get_curre
 
 @router.get("/quotes/{code}/export/pdf")
 def export_pdf(code: str, scope: str = Query("regular"), user=Depends(get_current_user)):
+    if _is_project_quote(code):
+        raise HTTPException(409, detail={"type": "project", "redirect": "/dashboard/wizard"})
     tdb = _tdb(user["username"], scope)
     try:
         docx_path = _generate_docx(code, tdb)

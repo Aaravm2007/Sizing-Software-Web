@@ -19,7 +19,7 @@ from sql_handler import (
     duplicate_sizing,
 )
 from auth import get_current_user
-from user_db import get_user_sizing_db
+from user_db import get_user_sizing_db, get_user_temp_db
 
 router = APIRouter()
 
@@ -554,6 +554,164 @@ def _build_wizard_excel(body: "WizardExportBody") -> str:
     return tmp.name
 
 
+# ── Export as Project (Multi Format) ───────────────────────────────────────────
+# Isolated from WizardCol/WizardExportBody/_build_wizard_excel above — zero risk
+# to the existing /export-wizard endpoint.
+
+class ProjectCol(BaseModel):
+    nominal_dc_voltage: str = ""
+    backup_requirement_min: str = ""
+    cell_chemistry: str = "LFP"
+    centre_tap: str = ""
+    cell_type: str = ""
+    ups_rating_kva: str = ""
+    power_factor: str = ""
+    inverter_efficiency: str = ""
+    end_cell_voltage: str = ""
+    max_charging_voltage: str = ""
+    calculated_load_kw: str = ""
+    energy_required_kwh: str = ""
+    capacity_required_ah: str = ""
+    nearest_capacity_ah: str = ""
+    total_available_energy_kwh: str = ""
+    backup_time_min: str = ""
+    offered_battery_config: str = ""
+    cost: str = ""                 # row 27 — Price with Cabinet & BMS
+    modular_rack: str = "-"        # row 28 label (rack key, or "-")
+    modular_rack_price: str = ""   # row 28 value
+
+
+class ProjectGroup(BaseModel):
+    name: str
+    cols: list[ProjectCol]
+
+
+class ProjectExportBody(BaseModel):
+    customer_name: str = ""
+    solution_provider: str = ""
+    quote_code: str = ""
+    sales_person: str = ""
+    dollar_rate: str = ""
+    warranty_years: str = "5"
+    groups: list[ProjectGroup]
+    # raw frontend wizard state (full ColState[] + groups), stored blindly for
+    # "Load Past Wizard" restore — backend never inspects its shape.
+    full_state: Optional[dict] = None
+
+
+# field -> template row number (Multi Format.xlsx layout, col A = label, cols B.. = solutions)
+PROJECT_ROW_MAP = {
+    "nominal_dc_voltage":         7,
+    "backup_requirement_min":     8,
+    "cell_chemistry":             9,
+    "centre_tap":                10,
+    "cell_type":                 11,
+    "ups_rating_kva":            12,
+    "power_factor":              13,
+    "inverter_efficiency":       14,
+    "end_cell_voltage":          15,
+    "max_charging_voltage":      16,
+    "calculated_load_kw":        18,
+    "energy_required_kwh":       19,
+    "capacity_required_ah":      20,
+    "nearest_capacity_ah":       21,
+    "total_available_energy_kwh": 22,
+    "backup_time_min":           25,
+    "offered_battery_config":    26,
+    "cost":                      27,
+    "modular_rack_price":        28,
+}
+# rows that carry per-solution data and must be cleared of template demo values
+# before writing (23/24 = secondary "kwh approx" sub-calc, intentionally left blank)
+PROJECT_DATA_ROWS = list(PROJECT_ROW_MAP.values()) + [23, 24]
+
+_CENTRE_TAP_MAP = {"Centre Tap": "3Wire", "Non Centre Tap": "2Wire"}
+
+
+def _sanitize_sheet_name(name: str, used: set) -> str:
+    invalid = set('\\/?*[]:')
+    cleaned = "".join(c for c in name if c not in invalid).strip() or "Group"
+    cleaned = cleaned[:31]
+    candidate = cleaned
+    n = 2
+    while candidate in used:
+        suffix = f" ({n})"
+        candidate = cleaned[:31 - len(suffix)] + suffix
+        n += 1
+    used.add(candidate)
+    return candidate
+
+
+def _build_project_excel(body: "ProjectExportBody") -> str:
+    import openpyxl
+    from openpyxl.utils import get_column_letter
+    from datetime import datetime as _dt
+
+    # Load the template into memory once. We clone its reference sheet natively
+    # (openpyxl's own copy_worksheet, not a manual attribute-by-attribute rebuild)
+    # so every bit of native formatting — styles, merges, conditional formatting,
+    # named styles, everything — survives untouched. The loaded workbook is only
+    # ever saved to a new temp path at the end; the template file on disk is
+    # never written back to.
+    template_path = str(APP_DIR / "templates" / "Multi_Format_template.xlsx")
+    wb = openpyxl.load_workbook(template_path)
+    reference_ws = wb["Base"]  # style reference: 8 cols = exactly MAX_GROUP_SIZE (7) solution slots
+
+    used_names: set = set()
+    new_sheets = []
+    for group in body.groups:
+        ws = wb.copy_worksheet(reference_ws)
+        ws.title = _sanitize_sheet_name(group.name, used_names)
+        _copy_images(reference_ws, ws)  # copy_worksheet doesn't carry images/charts
+        new_sheets.append(ws)
+
+        # clear demo data from the template across all solution columns (B..H)
+        for row_n in PROJECT_DATA_ROWS:
+            for col_n in range(2, 9):
+                ws.cell(row=row_n, column=col_n).value = None
+
+        # shared header (single merged cell per row, write to the anchor cell)
+        _write_cell(ws, "B4", body.customer_name)
+        _write_cell(ws, "B5", body.solution_provider)
+        _write_cell(ws, "H3", "Date:" + _dt.now().strftime("%d.%m.%Y"))
+
+        for i, col in enumerate(group.cols[:7]):
+            col_letter = get_column_letter(2 + i)  # B, C, D, E, F, G, H
+            values = {
+                "nominal_dc_voltage":         col.nominal_dc_voltage,
+                "backup_requirement_min":     col.backup_requirement_min,
+                "cell_chemistry":             col.cell_chemistry,
+                "centre_tap":                 _CENTRE_TAP_MAP.get(col.centre_tap, col.centre_tap),
+                "cell_type":                  col.cell_type,
+                "ups_rating_kva":             col.ups_rating_kva,
+                "power_factor":               col.power_factor,
+                "inverter_efficiency":        col.inverter_efficiency,
+                "end_cell_voltage":           col.end_cell_voltage,
+                "max_charging_voltage":       col.max_charging_voltage,
+                "calculated_load_kw":         col.calculated_load_kw,
+                "energy_required_kwh":        col.energy_required_kwh,
+                "capacity_required_ah":       col.capacity_required_ah,
+                "nearest_capacity_ah":        col.nearest_capacity_ah,
+                "total_available_energy_kwh": col.total_available_energy_kwh,
+                "backup_time_min":            col.backup_time_min,
+                "offered_battery_config":     col.offered_battery_config,
+                "cost":                       col.cost,
+                "modular_rack_price":         col.modular_rack_price if col.modular_rack != "-" else "",
+            }
+            for key, row_n in PROJECT_ROW_MAP.items():
+                addr = f"{col_letter}{row_n}"
+                _write_cell(ws, addr, _dash(values.get(key, "")))
+
+    # drop every original template sheet — only our per-group clones ship in the output
+    for name in list(wb.sheetnames):
+        if wb[name] not in new_sheets:
+            del wb[name]
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    wb.save(tmp.name)
+    return tmp.name
+
+
 def _xlsx_to_pdf(xlsx_path: str) -> str:
     """Convert xlsx temp file to PDF via win32com. Deletes xlsx. Returns pdf path."""
     import win32com.client
@@ -600,6 +758,93 @@ def export_wizard_pdf(body: WizardExportBody, _=Depends(get_current_user)):
         raise HTTPException(500, str(e))
     fname = f"{body.project_name or 'wizard'}_sizing.pdf"
     return FileResponse(pdf_path, media_type="application/pdf", filename=fname, background=None)
+
+
+@router.post("/export-project")
+def export_project(body: ProjectExportBody, user=Depends(get_current_user)):
+    if not body.groups or not any(g.cols for g in body.groups):
+        raise HTTPException(400, "No sizings to export")
+    try:
+        xlsx_path = _build_project_excel(body)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    # optional: register quote_code as metadata-only (no solutions) + Firebase backup for reload
+    if body.quote_code.strip():
+        from datetime import datetime as _dt
+        try:
+            from tempquotebase import add_new_quote
+            tdb = get_user_temp_db(user["username"])
+            add_new_quote(
+                body.quote_code.strip(), _dt.now().strftime("%Y-%m-%d"),
+                body.customer_name, body.solution_provider, "",
+                db_path=tdb, sales_person=body.sales_person,
+                dollar_rate=body.dollar_rate, warranty_years=body.warranty_years,
+            )
+        except Exception:
+            pass  # quote registration is best-effort; export must still succeed
+
+        try:
+            from firebase_init import get_db
+            fdb = get_db()
+            fdb.reference(f"project_quotes/{body.quote_code.strip()}").set({
+                "type": "Project",
+                "quote_code": body.quote_code.strip(),
+                "customer_name": body.customer_name,
+                "solution_provider": body.solution_provider,
+                "sales_person": body.sales_person,
+                "dollar_rate": body.dollar_rate,
+                "warranty_years": body.warranty_years,
+                "created_by": user.get("username", ""),
+                "created_at": int(_dt.now().timestamp() * 1000),
+                "groups": [g.dict() for g in body.groups],
+                "full_state": body.full_state,
+            })
+        except Exception:
+            pass  # Firebase backup is best-effort; export must still succeed
+
+    fname = f"{body.quote_code or 'project'}_multi_sizing.xlsx"
+    return FileResponse(xlsx_path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        filename=fname, background=None)
+
+
+@router.get("/project-quotes")
+def list_project_quotes(user=Depends(get_current_user)):
+    """Summaries of this user's past 'Export as Project' sessions, for 'Load Past Wizard'."""
+    try:
+        from firebase_init import get_db
+        fdb = get_db()
+        all_entries = fdb.reference("project_quotes").get() or {}
+    except Exception:
+        return []
+    username = user.get("username", "")
+    out = []
+    for code, entry in all_entries.items():
+        if not isinstance(entry, dict) or entry.get("created_by") != username:
+            continue
+        out.append({
+            "quote_code": entry.get("quote_code", code),
+            "customer_name": entry.get("customer_name", ""),
+            "solution_provider": entry.get("solution_provider", ""),
+            "created_at": entry.get("created_at", 0),
+        })
+    out.sort(key=lambda e: e["created_at"], reverse=True)
+    return out
+
+
+@router.get("/project-quotes/{code}")
+def get_project_quote(code: str, user=Depends(get_current_user)):
+    try:
+        from firebase_init import get_db
+        fdb = get_db()
+        entry = fdb.reference(f"project_quotes/{code}").get()
+    except Exception as e:
+        raise HTTPException(503, f"Firebase error: {e}")
+    if not entry or not isinstance(entry, dict):
+        raise HTTPException(404, "Project quote not found")
+    if entry.get("created_by") != user.get("username", ""):
+        raise HTTPException(403, "Not your project export")
+    return entry
 
 
 @router.get("/projects/{name}/export/pdf")

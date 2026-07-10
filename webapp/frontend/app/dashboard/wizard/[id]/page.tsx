@@ -30,6 +30,12 @@ const DC_VOLTAGES = [12, 24, 36, 48, 72, 96, 120, 144, 192, 240, 336, 360, 384, 
 const COL_W = 210;
 const LABEL_W = 190;
 
+interface WizardGroup {
+  id: string;
+  name: string;
+  colIndices: number[];
+}
+
 interface ColState {
   ups_make: string;
   ups_model: string;
@@ -47,6 +53,8 @@ interface ColState {
   derating_factor_percent: string;
   centre_tap: string;
   cell_type: string;
+  cell_chemistry: string;
+  modular_rack: string;
   calc_done: boolean;
   calculated_load_kw: string;
   number_of_cells: string;
@@ -76,6 +84,8 @@ const EMPTY_COL = (): ColState => ({
   design_margin_percent: "", dod_margin_percent: "",
   derating_factor_percent: "",
   centre_tap: "Non Centre Tap", cell_type: "Prismatic",
+  cell_chemistry: "LFP",
+  modular_rack: "-",
   calc_done: false,
   calculated_load_kw: "", number_of_cells: "",
   max_charging_voltage: "", end_cell_voltage: "",
@@ -90,6 +100,25 @@ const EMPTY_COL = (): ColState => ({
 });
 
 function n(v: string) { return parseFloat(v) || 0; }
+
+interface CostingRowLike {
+  partcode?: string;
+  est_sales_b?: string | number;
+  total_cost?: string | number;
+}
+
+// same logic as costing page's getCostValue — HVL -> est_sales_b, EFL -> total_cost*1.06
+function getCostValue(row: CostingRowLike | undefined): number {
+  if (!row) return 0;
+  const pc = String(row.partcode ?? "").toUpperCase();
+  if (pc.includes("HVL")) return Number(row.est_sales_b) || 0;
+  if (pc.includes("EFL")) return (Number(row.total_cost) || 0) * 1.06;
+  return Number(row.est_sales_b) || 0;
+}
+
+const CENTRE_TAP_TO_WIRE: Record<string, string> = {
+  "Centre Tap": "3Wire", "Non Centre Tap": "2Wire",
+};
 
 // ── reusable table-cell helpers ───────────────────────────────────────────────
 
@@ -131,10 +160,46 @@ export default function WizardComparePage() {
   const [showSizing,    setShowSizing]    = useState(true);
   const [showCosting,   setShowCosting]   = useState(true);
 
+  // column groups (for "Export as Project")
+  const [groups,           setGroups]           = useState<WizardGroup[]>([]);
+  const [groupDialogOpen,  setGroupDialogOpen]  = useState(false);
+  const [editingGroupId,   setEditingGroupId]   = useState<string | null>(null);
+  const [groupNameInput,   setGroupNameInput]   = useState("");
+  const [groupColSelection, setGroupColSelection] = useState<Set<number>>(new Set());
+  const MAX_GROUP_SIZE = 7;
+
+  // cell chemistry options (same source as main Sizing screen)
+  const [chemistries, setChemistries] = useState<string[]>(["LFP"]);
+  useEffect(() => {
+    api.get("/api/formulas/cell-voltages")
+      .then(r => {
+        const names = (r.data as { chemistry: string }[]).map(c => c.chemistry);
+        if (names.length) setChemistries(names);
+      })
+      .catch(() => {});
+  }, []);
+
+  // modular rack options
+  const [rackOptions, setRackOptions] = useState<{ key: string; price: number }[]>([]);
+  useEffect(() => {
+    api.get("/api/formulas/modular-rack-rates")
+      .then(r => setRackOptions(r.data as { key: string; price: number }[]))
+      .catch(() => {});
+  }, []);
+  const rackPrice = (key: string) => rackOptions.find(r => r.key === key)?.price ?? 0;
+
   // pending link state for sizing export
   const [pendingLinkOpen,    setPendingLinkOpen]    = useState(false);
   const [pendingExportData,  setPendingExportData]  = useState<Record<string, string>>({ export_type: "sizing_excel" });
+  const [pendingExportDataList, setPendingExportDataList] = useState<Record<string, string>[] | undefined>(undefined);
   const [pendingExportFn,    setPendingExportFn]    = useState<(() => void) | null>(null);
+
+  // ── Export as Project ────────────────────────────────────────────────────
+  const [projectStep,        setProjectStep]        = useState<"form" | "preview" | null>(null);
+  const [pQuoteCode,          setPQuoteCode]         = useState("");
+  const [pSalesPerson,        setPSalesPerson]       = useState("");
+  const [pDollarRate,         setPDollarRate]        = useState("");
+  const [pWarrantyYears,      setPWarrantyYears]     = useState("5");
 
   // ── load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -147,12 +212,15 @@ export default function WizardComparePage() {
       const data = JSON.parse(saved);
       setCustomerName(data.customer_name || "");
       setSolutionProvider(data.solution_provider || "");
-      const loadedCols = data.cols?.length ? data.cols : Array.from({ length: proj.count }, EMPTY_COL);
+      const loadedCols = data.cols?.length
+        ? data.cols.map((c: Partial<ColState>) => ({ ...EMPTY_COL(), ...c }))
+        : Array.from({ length: proj.count }, EMPTY_COL);
       setCols(loadedCols);
       setResultIdx(Array.from({ length: loadedCols.length }, () => 0));
       setSelectedCols(loadedCols.map((c: ColState) => c.in_quote ?? false));
       setCalcDone(data.calc_done || false);
       setCostingDone(data.costing_done || false);
+      setGroups(Array.isArray(data.groups) ? data.groups : []);
       if (data.quote_code) {
         setQuoteCode(data.quote_code);
         // verify quote still exists; if deleted, clear all in_quote flags
@@ -178,8 +246,9 @@ export default function WizardComparePage() {
     localStorage.setItem(`wizard_data_${id}`, JSON.stringify({
       customer_name: customerName, solution_provider: solutionProvider,
       cols, calc_done: calcDone, costing_done: costingDone, quote_code: quoteCode,
+      groups,
     }));
-  }, [customerName, solutionProvider, cols, calcDone, costingDone, quoteCode, id]);
+  }, [customerName, solutionProvider, cols, calcDone, costingDone, quoteCode, groups, id]);
 
   // ── helpers ───────────────────────────────────────────────────────────────
   const updateCol = (i: number, patch: Partial<ColState>) =>
@@ -211,7 +280,7 @@ export default function WizardComparePage() {
         designMarginPct: n(col.design_margin_percent),
         dodMarginPct: n(col.dod_margin_percent),
         deratingPct: n(col.derating_factor_percent),
-        cellChemistry: "LFP", nearestCapacity: n(col.nearest_capacity_ah),
+        cellChemistry: col.cell_chemistry || "LFP", nearestCapacity: n(col.nearest_capacity_ah),
       });
       return {
         ...col, calc_done: true,
@@ -274,7 +343,8 @@ export default function WizardComparePage() {
       ageing_type: s.ageing_type, ageing_percent: s.ageing_percent,
       design_margin_percent: s.design_margin_percent, dod_margin_percent: s.dod_margin_percent,
       derating_factor_percent: s.derating_factor_percent,
-      centre_tap: s.centre_tap, cell_type: s.cell_type,
+      centre_tap: s.centre_tap, cell_type: s.cell_type, cell_chemistry: s.cell_chemistry,
+      modular_rack: s.modular_rack,
     });
     setClipSource(null);
     toast.success(`Copied Sizing ${from + 1} → Sizing ${to + 1}`);
@@ -459,6 +529,210 @@ export default function WizardComparePage() {
     setResultIdx(prev => prev.filter((_, idx) => idx !== i));
     if (clipSource === i) setClipSource(null);
     else if (clipSource !== null && clipSource > i) setClipSource(clipSource - 1);
+    // shift/remove group column indices to match the new column layout
+    setGroups(prev => prev
+      .map(g => ({
+        ...g,
+        colIndices: g.colIndices
+          .filter(ci => ci !== i)
+          .map(ci => ci > i ? ci - 1 : ci),
+      }))
+      .filter(g => g.colIndices.length > 0)
+    );
+  };
+
+  // ── group helpers ─────────────────────────────────────────────────────────
+  const getColGroup = (i: number) => groups.find(g => g.colIndices.includes(i));
+
+  const openNewGroupDialog = () => {
+    setEditingGroupId(null);
+    setGroupNameInput(`Group ${groups.length + 1}`);
+    setGroupColSelection(new Set());
+    setGroupDialogOpen(true);
+  };
+
+  const openEditGroupDialog = (g: WizardGroup) => {
+    setEditingGroupId(g.id);
+    setGroupNameInput(g.name);
+    setGroupColSelection(new Set(g.colIndices));
+    setGroupDialogOpen(true);
+  };
+
+  const toggleGroupCol = (i: number) => {
+    setGroupColSelection(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) {
+        next.delete(i);
+      } else {
+        if (next.size >= MAX_GROUP_SIZE) {
+          toast.warning(`A group can have at most ${MAX_GROUP_SIZE} sizings`);
+          return prev;
+        }
+        next.add(i);
+      }
+      return next;
+    });
+  };
+
+  const handleSaveGroup = () => {
+    const name = groupNameInput.trim();
+    if (!name) { toast.error("Group name required"); return; }
+    if (!groupColSelection.size) { toast.error("Select at least one sizing"); return; }
+    const colIndices = Array.from(groupColSelection).sort((a, b) => a - b);
+    setGroups(prev => {
+      // remove selected columns from any other group first (a column belongs to at most one group)
+      const cleaned = prev.map(g => g.id === editingGroupId ? g : {
+        ...g, colIndices: g.colIndices.filter(ci => !groupColSelection.has(ci)),
+      }).filter(g => g.id === editingGroupId || g.colIndices.length > 0);
+
+      if (editingGroupId) {
+        return cleaned.map(g => g.id === editingGroupId ? { ...g, name, colIndices } : g);
+      }
+      return [...cleaned, { id: `grp_${Date.now()}`, name, colIndices }];
+    });
+    setGroupDialogOpen(false);
+  };
+
+  const handleDeleteGroup = (id: string) => {
+    setGroups(prev => prev.filter(g => g.id !== id));
+  };
+
+  // ── Export as Project helpers ────────────────────────────────────────────
+  const effectiveGroups = (() => {
+    const assigned = new Set(groups.flatMap(g => g.colIndices));
+    const ungroupedIndices = cols.map((_, i) => i).filter(i => !assigned.has(i));
+    const real = groups.map(g => ({ name: g.name, colIndices: g.colIndices }));
+    if (ungroupedIndices.length) real.push({ name: "Default", colIndices: ungroupedIndices });
+    return real;
+  })();
+
+  const buildProjectCol = (i: number) => {
+    const col = cols[i];
+    const activeRow = col.costing_rows[resultIdx[i] ?? 0];
+    return {
+      nominal_dc_voltage: col.nominal_dc_voltage,
+      backup_requirement_min: col.backup_requirement_min,
+      cell_chemistry: col.cell_chemistry,
+      centre_tap: col.centre_tap,
+      cell_type: col.cell_type,
+      ups_rating_kva: col.ups_rating_kva,
+      power_factor: col.power_factor,
+      inverter_efficiency: col.inverter_efficiency,
+      end_cell_voltage: col.end_cell_voltage,
+      max_charging_voltage: col.max_charging_voltage,
+      calculated_load_kw: col.calculated_load_kw,
+      energy_required_kwh: col.energy_required_kwh,
+      capacity_required_ah: col.capacity_required_ah,
+      nearest_capacity_ah: col.nearest_capacity_ah,
+      total_available_energy_kwh: col.total_available_energy_kwh,
+      backup_time_min: col.backup_time_min,
+      offered_battery_config: col.offered_battery_config,
+      cost: activeRow ? String(getCostValue(activeRow)) : "",
+      modular_rack: col.modular_rack,
+      modular_rack_price: col.modular_rack !== "-" ? String(rackPrice(col.modular_rack)) : "",
+    };
+  };
+  type ProjectColData = ReturnType<typeof buildProjectCol>;
+
+  const buildProjectPayload = () => ({
+    customer_name: customerName,
+    solution_provider: solutionProvider,
+    quote_code: pQuoteCode.trim(),
+    sales_person: pSalesPerson,
+    dollar_rate: pDollarRate,
+    warranty_years: pWarrantyYears,
+    groups: effectiveGroups.map(g => ({
+      name: g.name,
+      cols: g.colIndices.map(buildProjectCol),
+    })),
+    // full wizard state, stored blindly by the backend for "Load Past Wizard" restore
+    full_state: { customer_name: customerName, solution_provider: solutionProvider, cols, groups },
+  });
+
+  const openProjectExport = async () => {
+    if (!cols.some(c => c.offered_battery_config && c.offered_battery_config !== "—")) {
+      toast.warning("No sized columns to export");
+      return;
+    }
+    setPSalesPerson(""); setPDollarRate(""); setPWarrantyYears("5");
+    try {
+      const res = await api.get("/api/quotation/next-code");
+      setPQuoteCode(res.data.code || "");
+    } catch { setPQuoteCode(""); }
+    setProjectStep("form");
+  };
+
+  // actual API call + file download — only runs after the user links to a pending item
+  const _doDownloadProject = async () => {
+    try {
+      const payload = buildProjectPayload();
+      const res = await api.post("/api/sizing/export-project", payload, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${pQuoteCode || "project"}_multi_sizing.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      toast.error(apiErr(e, "Export failed"));
+    }
+  };
+
+  // preview "Export" click: build per-column export-history entries, then open the
+  // pending-link dialog. Download itself is deferred until linking succeeds (same
+  // convention as the existing sizing export flow).
+  const handleConfirmProjectExport = () => {
+    // sol_no must be unique across the WHOLE export (all groups share one quote_code),
+    // so it runs as one counter here rather than resetting per group.
+    let globalSolNo = 0;
+    const entries: Record<string, string>[] = effectiveGroups.flatMap(g =>
+      g.colIndices.map((idx) => {
+        globalSolNo += 1;
+        const col = cols[idx];
+        const activeRow = col.costing_rows[resultIdx[idx] ?? 0];
+        return {
+          export_type: "quote_project",
+          sol_no: String(globalSolNo),
+          quote_code: pQuoteCode.trim(),
+          sales_person: pSalesPerson,
+          dollar_rate: pDollarRate,
+          solution_provider: solutionProvider,
+          project_customer: customerName,
+          part_code: col.offered_battery_config,
+          cell_type: col.cell_type,
+          centre_tap: col.centre_tap,
+          ageing_type: col.ageing_type,
+          backup_time_min: col.backup_time_min,
+          price_system: activeRow ? String(getCostValue(activeRow)) : "",
+          rack1_dim: col.modular_rack !== "-" ? col.modular_rack : "",
+          rack1_price: col.modular_rack !== "-" ? String(rackPrice(col.modular_rack)) : "",
+          ups_make: col.ups_make,
+          ups_model: col.ups_model,
+          actual_load_kva: col.actual_load_kva,
+          load_kw: col.actual_load_kw,
+          power_factor: col.power_factor,
+          inverter_efficiency: col.inverter_efficiency,
+          dc_voltage: col.nominal_dc_voltage,
+          backup_min: col.backup_requirement_min,
+          cell_chemistry: col.cell_chemistry,
+          ageing_pct: col.ageing_percent,
+          design_margin_pct: col.design_margin_percent,
+          dod_margin_pct: col.dod_margin_percent,
+          derating_pct: col.derating_factor_percent,
+          capacity_ah: col.nearest_capacity_ah,
+        };
+      })
+    );
+    setProjectStep(null);
+    setPendingExportDataList(entries);
+    // NOTE: this top-level tag must NOT start with "quote_" — PendingLinkDialog's
+    // isQuoteExport check tests this exact field and would otherwise reroute the
+    // whole flow into the single-quote /from-quote endpoint, bypassing the bulk
+    // exportDataList entries below entirely (each of which correctly keeps the
+    // "quote_project" prefix so the backend's Inquiry-sync logic picks them up).
+    setPendingExportData({ export_type: "project_export" });
+    setPendingExportFn(() => _doDownloadProject);
+    setPendingLinkOpen(true);
   };
 
   if (!cols.length) return <div className="p-5 text-muted-foreground">Loading…</div>;
@@ -490,6 +764,7 @@ export default function WizardComparePage() {
           </button>
         )}
         <Button size="sm" onClick={handleSize}>Size All</Button>
+        <Button variant="outline" size="sm" onClick={openNewGroupDialog}>+ New Group</Button>
         {calcDone && showSizing && (
           <>
             <Button variant="outline" size="sm" onClick={handleExportSizing} className="gap-1.5">
@@ -499,6 +774,10 @@ export default function WizardComparePage() {
             <Button variant="outline" size="sm" onClick={handleExportSizingPdf} className="gap-1.5">
               <Download className="h-3.5 w-3.5" />
               Sizing PDF
+            </Button>
+            <Button variant="outline" size="sm" onClick={openProjectExport} className="gap-1.5">
+              <Download className="h-3.5 w-3.5" />
+              Export as Project
             </Button>
           </>
         )}
@@ -537,6 +816,34 @@ export default function WizardComparePage() {
         </div>
       </div>
 
+      {/* ── Groups bar ── */}
+      {groups.length > 0 && (
+        <div className="flex items-center gap-2 px-4 py-1.5 border-b bg-muted/10 shrink-0 flex-wrap">
+          <span className="text-xs text-muted-foreground font-medium">Groups:</span>
+          {groups.map(g => (
+            <span
+              key={g.id}
+              className="flex items-center gap-1.5 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full cursor-pointer hover:bg-primary/20"
+              onClick={() => openEditGroupDialog(g)}
+            >
+              {g.name} ({g.colIndices.length}/{MAX_GROUP_SIZE})
+              <X
+                className="h-3 w-3 hover:text-destructive"
+                onClick={e => { e.stopPropagation(); handleDeleteGroup(g.id); }}
+              />
+            </span>
+          ))}
+          {(() => {
+            const ungrouped = cols.filter((_, i) => !getColGroup(i)).length;
+            return ungrouped > 0 ? (
+              <span className="text-xs text-muted-foreground">
+                {ungrouped} ungrouped → exported as &quot;Default&quot;
+              </span>
+            ) : null;
+          })()}
+        </div>
+      )}
+
       {/* ── Comparison table — scrolls both axes ── */}
       <div className="flex-1 overflow-auto">
         <table className="border-collapse text-sm" style={{ minWidth: LABEL_W + C * COL_W + 40 }}>
@@ -573,6 +880,11 @@ export default function WizardComparePage() {
                         onChange={e => handleCheck(i, e.target.checked)}
                       />
                       <span>Sizing {i + 1}</span>
+                      {getColGroup(i) && (
+                        <span className="text-[9px] bg-primary/20 text-primary px-1 py-0.5 rounded-full leading-none">
+                          {getColGroup(i)!.name}
+                        </span>
+                      )}
                     </label>
                     <div className="flex items-center gap-0.5 shrink-0">
                       <button
@@ -720,6 +1032,33 @@ export default function WizardComparePage() {
                       value={col.cell_type} onChange={e => sel(i, "cell_type", e.target.value)}>
                       <option value="Prismatic">Prismatic</option>
                       <option value="Cylindrical">Cylindrical</option>
+                    </select>
+                  </td>
+                ))}
+              </tr>
+
+              {/* Cell Chemistry */}
+              <tr>
+                <td className={labelTd}>Cell Chemistry</td>
+                {cols.map((col, i) => (
+                  <td key={i} className={dataTd}>
+                    <select className="h-7 w-full rounded border px-1 text-sm bg-background"
+                      value={col.cell_chemistry} onChange={e => sel(i, "cell_chemistry", e.target.value)}>
+                      {chemistries.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </td>
+                ))}
+              </tr>
+
+              {/* Modular Battery Rack */}
+              <tr>
+                <td className={labelTd}>Modular Battery Rack</td>
+                {cols.map((col, i) => (
+                  <td key={i} className={dataTd}>
+                    <select className="h-7 w-full rounded border px-1 text-sm bg-background"
+                      value={col.modular_rack} onChange={e => sel(i, "modular_rack", e.target.value)}>
+                      <option value="-">- (none)</option>
+                      {rackOptions.map(r => <option key={r.key} value={r.key}>{r.key}</option>)}
                     </select>
                   </td>
                 ))}
@@ -1025,12 +1364,158 @@ export default function WizardComparePage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>{editingGroupId ? "Edit Group" : "New Group"}</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <div className="flex flex-col gap-1">
+              <Label>Group Name</Label>
+              <Input value={groupNameInput} onChange={e => setGroupNameInput(e.target.value)} autoFocus />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Sizings ({groupColSelection.size}/{MAX_GROUP_SIZE})</Label>
+              <div className="flex flex-col gap-1 max-h-56 overflow-y-auto border rounded-md p-2">
+                {cols.map((_, i) => {
+                  const owner = getColGroup(i);
+                  const disabled = !!owner && owner.id !== editingGroupId;
+                  return (
+                    <label key={i} className={cn("flex items-center gap-2 text-sm px-1 py-0.5 rounded", disabled ? "opacity-40" : "cursor-pointer hover:bg-muted")}>
+                      <input
+                        type="checkbox"
+                        disabled={disabled}
+                        checked={groupColSelection.has(i)}
+                        onChange={() => toggleGroupCol(i)}
+                      />
+                      Sizing {i + 1}
+                      {disabled && <span className="text-xs text-muted-foreground">(in {owner!.name})</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            {editingGroupId && (
+              <Button variant="destructive" onClick={() => { handleDeleteGroup(editingGroupId); setGroupDialogOpen(false); }}>
+                Delete Group
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => setGroupDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveGroup}>{editingGroupId ? "Save" : "Create"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Export as Project: metadata form ── */}
+      <Dialog open={projectStep === "form"} onOpenChange={open => { if (!open) setProjectStep(null); }}>
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Export as Project</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <div className="flex flex-col gap-1">
+              <Label>Quote Code</Label>
+              <Input value={pQuoteCode} onChange={e => setPQuoteCode(e.target.value)} placeholder="optional" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Customer Name</Label>
+              <Input value={customerName} onChange={e => setCustomerName(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Solution Provider</Label>
+              <Input value={solutionProvider} onChange={e => setSolutionProvider(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Sales Person</Label>
+              <Input value={pSalesPerson} onChange={e => setPSalesPerson(e.target.value)} placeholder="optional" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Dollar Rate</Label>
+              <Input value={pDollarRate} onChange={e => setPDollarRate(e.target.value)} placeholder="optional" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Warranty (years)</Label>
+              <Input type="number" value={pWarrantyYears} onChange={e => setPWarrantyYears(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setProjectStep(null)}>Cancel</Button>
+            <Button onClick={() => setProjectStep("preview")}>Next: Preview</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Export as Project: preview ── */}
+      <Dialog open={projectStep === "preview"} onOpenChange={open => { if (!open) setProjectStep(null); }}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Preview — {effectiveGroups.length} sheet(s)</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-6 py-2">
+            {effectiveGroups.map(g => {
+              const rows: [string, keyof ProjectColData][] = [
+                ["Nominal DC Voltage (V)", "nominal_dc_voltage"],
+                ["Backup Requirement (Min)", "backup_requirement_min"],
+                ["Chemistry", "cell_chemistry"],
+                ["Centre Tap / Wire", "centre_tap"],
+                ["Cell Type", "cell_type"],
+                ["UPS Rating (KVA)", "ups_rating_kva"],
+                ["Power Factor", "power_factor"],
+                ["Inverter Efficiency", "inverter_efficiency"],
+                ["End Cell Voltage (V)", "end_cell_voltage"],
+                ["Max Charging Voltage (V)", "max_charging_voltage"],
+                ["Calculated Load (kW)", "calculated_load_kw"],
+                ["Energy Required (kWh)", "energy_required_kwh"],
+                ["Capacity Required (AH)", "capacity_required_ah"],
+                ["Nearest Available Capacity (AH)", "nearest_capacity_ah"],
+                ["Total Available Energy (kWh)", "total_available_energy_kwh"],
+                ["Backup Time (Min) at BOL", "backup_time_min"],
+                ["Configuration", "offered_battery_config"],
+                ["Price with Cabinet & BMS", "cost"],
+                ["Modular Battery Rack", "modular_rack_price"],
+              ];
+              const groupCols = g.colIndices.map(buildProjectCol);
+              return (
+                <div key={g.name} className="flex flex-col gap-1.5">
+                  <h3 className="text-sm font-semibold">{g.name} ({groupCols.length}/{MAX_GROUP_SIZE})</h3>
+                  <div className="overflow-x-auto border rounded-md">
+                    <table className="text-xs w-full">
+                      <tbody>
+                        {rows.map(([label, key]) => (
+                          <tr key={key} className="border-b last:border-0">
+                            <td className="px-2 py-1 font-medium text-muted-foreground whitespace-nowrap bg-muted/30 sticky left-0">
+                              {label}
+                            </td>
+                            {groupCols.map((c, i) => (
+                              <td key={i} className="px-2 py-1 text-center whitespace-nowrap">
+                                {key === "centre_tap"
+                                  ? (CENTRE_TAP_TO_WIRE[c.centre_tap] || c.centre_tap || "-")
+                                  : (c[key] || "-")}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setProjectStep("form")}>Back</Button>
+            <Button onClick={handleConfirmProjectExport}>Export</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <PendingLinkDialog
         open={pendingLinkOpen}
-        exportLabel={`Wizard Sizing: ${projectName} (${pendingExportData.export_type === "sizing_pdf" ? "PDF" : "Excel"})`}
+        exportLabel={
+          pendingExportData.export_type === "project_export"
+            ? `Wizard Project Export: ${projectName} (${pendingExportDataList?.length ?? 0} sizings)`
+            : `Wizard Sizing: ${projectName} (${pendingExportData.export_type === "sizing_pdf" ? "PDF" : "Excel"})`
+        }
         exportData={pendingExportData}
-        onClose={() => setPendingLinkOpen(false)}
-        onDone={() => { pendingExportFn?.(); setPendingLinkOpen(false); }}
+        exportDataList={pendingExportDataList}
+        onClose={() => { setPendingLinkOpen(false); setPendingExportDataList(undefined); }}
+        onDone={() => { pendingExportFn?.(); setPendingLinkOpen(false); setPendingExportDataList(undefined); }}
       />
     </div>
   );
