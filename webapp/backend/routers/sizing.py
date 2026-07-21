@@ -4,7 +4,7 @@ import math
 import tempfile
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -18,7 +18,7 @@ from sql_handler import (
     fetch_max_sr_no, insert_sizing, update_sizing, delete_sizing, delete_project,
     duplicate_sizing,
 )
-from auth import get_current_user
+from auth import get_current_user, get_expert_user
 from user_db import get_user_sizing_db, get_user_temp_db
 
 router = APIRouter()
@@ -139,6 +139,42 @@ def _row_to_dict(row) -> dict:
 
 # ── project endpoints ─────────────────────────────────────────────────────────
 
+def _all_usernames() -> list[str]:
+    """Same source as the admin panel's user list: hardcoded expert + Firebase allowed_users."""
+    usernames = ["a"]
+    try:
+        from firebase_init import get_db
+        db = get_db()
+        snap = db.reference("allowed_users").get() or {}
+        if isinstance(snap, dict):
+            usernames.extend(u for u in snap if u != "a")
+    except Exception:
+        pass
+    return usernames
+
+
+def _resolve_db(user: dict, owner: Optional[str]) -> str:
+    """Resolve which user's sizing.db to operate on. owner requires expert access."""
+    if owner and owner != user["username"]:
+        get_expert_user(user)
+        return get_user_sizing_db(owner)
+    return get_user_sizing_db(user["username"])
+
+
+@router.get("/all-projects")
+def list_all_projects(search: str = "", username: str = "", user=Depends(get_expert_user)):
+    result = []
+    for uname in _all_usernames():
+        if username and uname != username:
+            continue
+        db = get_user_sizing_db(uname)
+        for p in fetch_all_projects(db_path=db):
+            if search and search.lower() not in p.lower() and search.lower() not in uname.lower():
+                continue
+            result.append({"username": uname, "name": p, "count": fetch_max_sr_no(p, db_path=db)})
+    return result
+
+
 @router.get("/projects")
 def list_projects(user=Depends(get_current_user)):
     db = get_user_sizing_db(user["username"])
@@ -169,8 +205,8 @@ def remove_project(name: str, user=Depends(get_current_user)):
 # ── sizing CRUD ───────────────────────────────────────────────────────────────
 
 @router.get("/projects/{name}/sizings")
-def list_sizings(name: str, user=Depends(get_current_user)):
-    db = get_user_sizing_db(user["username"])
+def list_sizings(name: str, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+    db = _resolve_db(user, owner)
     try:
         rows = fetch_all_sizings(name, db_path=db)
     except ValueError:
@@ -179,8 +215,8 @@ def list_sizings(name: str, user=Depends(get_current_user)):
 
 
 @router.get("/projects/{name}/sizings/{sr_no}")
-def get_sizing(name: str, sr_no: int, user=Depends(get_current_user)):
-    db = get_user_sizing_db(user["username"])
+def get_sizing(name: str, sr_no: int, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+    db = _resolve_db(user, owner)
     try:
         row = fetch_sizing_by_sr(name, sr_no, db_path=db)
     except ValueError:
@@ -191,8 +227,8 @@ def get_sizing(name: str, sr_no: int, user=Depends(get_current_user)):
 
 
 @router.post("/projects/{name}/sizings", status_code=201)
-def add_sizing(name: str, body: SizingData, user=Depends(get_current_user)):
-    db = get_user_sizing_db(user["username"])
+def add_sizing(name: str, body: SizingData, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+    db = _resolve_db(user, owner)
     try:
         sr_no = insert_sizing(name, _to_db_dict(body), db_path=db)
     except ValueError as e:
@@ -201,8 +237,8 @@ def add_sizing(name: str, body: SizingData, user=Depends(get_current_user)):
 
 
 @router.put("/projects/{name}/sizings/{sr_no}")
-def edit_sizing(name: str, sr_no: int, body: SizingData, user=Depends(get_current_user)):
-    db = get_user_sizing_db(user["username"])
+def edit_sizing(name: str, sr_no: int, body: SizingData, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+    db = _resolve_db(user, owner)
     try:
         update_sizing(name, sr_no, _to_db_dict(body), db_path=db)
     except ValueError as e:
@@ -211,8 +247,8 @@ def edit_sizing(name: str, sr_no: int, body: SizingData, user=Depends(get_curren
 
 
 @router.delete("/projects/{name}/sizings/{sr_no}")
-def remove_sizing(name: str, sr_no: int, user=Depends(get_current_user)):
-    db = get_user_sizing_db(user["username"])
+def remove_sizing(name: str, sr_no: int, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+    db = _resolve_db(user, owner)
     try:
         delete_sizing(name, sr_no, db_path=db)
     except ValueError as e:
@@ -221,8 +257,8 @@ def remove_sizing(name: str, sr_no: int, user=Depends(get_current_user)):
 
 
 @router.post("/projects/{name}/sizings/{sr_no}/duplicate")
-def dup_sizing(name: str, sr_no: int, user=Depends(get_current_user)):
-    db = get_user_sizing_db(user["username"])
+def dup_sizing(name: str, sr_no: int, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+    db = _resolve_db(user, owner)
     try:
         duplicate_sizing(name, sr_no, db_path=db)
     except ValueError as e:
@@ -390,8 +426,8 @@ def _build_excel(name: str, sr_no: Optional[int], db_path: str = None) -> str:
 
 
 @router.get("/projects/{name}/export/excel")
-def export_excel(name: str, sr_no: Optional[int] = None, user=Depends(get_current_user)):
-    sdb = get_user_sizing_db(user["username"])
+def export_excel(name: str, sr_no: Optional[int] = None, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+    sdb = _resolve_db(user, owner)
     try:
         path = _build_excel(name, sr_no, db_path=sdb)
     except Exception as e:
@@ -848,9 +884,10 @@ def get_project_quote(code: str, user=Depends(get_current_user)):
 
 
 @router.get("/projects/{name}/export/pdf")
-def export_pdf(name: str, sr_no: Optional[int] = None, _=Depends(get_current_user)):
+def export_pdf(name: str, sr_no: Optional[int] = None, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+    sdb = _resolve_db(user, owner)
     try:
-        xlsx_path = _build_excel(name, sr_no)
+        xlsx_path = _build_excel(name, sr_no, db_path=sdb)
         pdf_path  = _xlsx_to_pdf(xlsx_path)
     except ImportError:
         raise HTTPException(501, "PDF export requires Microsoft Excel installed on the server")

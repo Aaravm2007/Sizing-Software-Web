@@ -352,13 +352,13 @@ function NewCostingInner() {
         next.voltage = parts[0];
         next.ampere_capacity = parts[1];
       }
-      return { ...next, ...recalc(next) };
+      return { ...next, ...recalc(next, locked) };
     });
   };
 
   const saveMut = useMutation({
     mutationFn: () => {
-      const calc = recalc(form);
+      const calc = recalc(form, locked);
       const merged = { ...form, ...calc };
       const payload = {
         dollar_rate: merged.dollar_rate,

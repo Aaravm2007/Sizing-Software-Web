@@ -1,7 +1,7 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, apiErr } from "@/lib/api";
@@ -30,6 +30,11 @@ export default function SizingListPage() {
   const projectName = decodeURIComponent(params.project as string);
   const router = useRouter();
   const qc = useQueryClient();
+  const searchParams = useSearchParams();
+  const owner = searchParams.get("owner") || "";
+  const ownerQS = owner ? `owner=${encodeURIComponent(owner)}` : "";
+  const withOwner = (url: string) => owner ? `${url}${url.includes("?") ? "&" : "?"}${ownerQS}` : url;
+  const withOwnerLink = (url: string) => owner ? `${url}?${ownerQS}` : url;
 
   const [selected, setSelected] = useState<number | null>(null);
   const [addingRow, setAddingRow] = useState(false);
@@ -47,17 +52,17 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const [pendingAction, setPendingActionState] = useState(() => getPendingAction());
   const pendingForMe = pendingAction?.type === "sizing" ? pendingAction : null;
 
-  const qKey = ["sizings", projectName];
+  const qKey = ["sizings", projectName, owner];
 
   const { data: sizings = [], isLoading } = useQuery<SizingRow[]>({
     queryKey: qKey,
     queryFn: () =>
-      api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings`).then((r) => r.data),
+      api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings`)).then((r) => r.data),
   });
 
   const addMut = useMutation({
     mutationFn: () =>
-      api.post(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings`, {}),
+      api.post(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings`), {}),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: qKey });
       // navigate to new sizing — backend returns new sr_no via list refresh
@@ -68,7 +73,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
   const deleteMut = useMutation({
     mutationFn: (sr: number) =>
-      api.delete(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`),
+      api.delete(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qKey });
       setSelected(null);
@@ -78,7 +83,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
   const dupMut = useMutation({
     mutationFn: (sr: number) =>
-      api.post(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}/duplicate`),
+      api.post(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}/duplicate`)),
     onSuccess: () => qc.invalidateQueries({ queryKey: qKey }),
     onError: (e: any) => toast.error(apiErr(e, "Duplicate failed")),
   });
@@ -87,12 +92,12 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     if (addingRow) return;
     setAddingRow(true);
     try {
-      const res = await api.post(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings`, {});
+      const res = await api.post(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings`), {});
       qc.invalidateQueries({ queryKey: qKey });
       const newSr = res.data.sr_no;
       if (newSr != null) {
-        qc.removeQueries({ queryKey: ["sizing", projectName, newSr] });
-        router.push(`/dashboard/sizing/${encodeURIComponent(projectName)}/${newSr}`);
+        qc.removeQueries({ queryKey: ["sizing", projectName, newSr, owner] });
+        router.push(withOwnerLink(`/dashboard/sizing/${encodeURIComponent(projectName)}/${newSr}`));
       }
     } catch (e: any) {
       toast.error(apiErr(e, "Add failed"));
@@ -103,7 +108,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const doExport = () => {
     const sr = exportScope === "selected" ? selected : null;
     const srParam = sr != null ? `?sr_no=${sr}` : "";
-    const endpoint = `/api/sizing/projects/${encodeURIComponent(projectName)}/export/${exportFormat}${srParam}`;
+    const endpoint = withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/export/${exportFormat}${srParam}`);
     api.get(endpoint, { responseType: "blob" }).then((res) => {
       const ext = exportFormat === "excel" ? "xlsx" : "pdf";
       const url = window.URL.createObjectURL(new Blob([res.data]));
@@ -144,7 +149,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     if (exportScope === "selected" && selected != null) {
       try {
         const row = await api.get(
-          `/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selected}`
+          withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selected}`)
         ).then((r) => r.data);
         setPendingExportData(_rowToExportData(row, exportFormat));
       } catch {
@@ -156,7 +161,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       try {
         const rows = await Promise.all(
           sizings.map((s) =>
-            api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`)
+            api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`))
               .then((r) => r.data).catch(() => null)
           )
         );
@@ -179,6 +184,11 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
           ← Back
         </Button>
         <h1 className="text-2xl font-bold">{projectName}</h1>
+        {owner && (
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300">
+            Viewing {owner}&apos;s project
+          </span>
+        )}
       </div>
 
       {pendingForMe && (
@@ -192,7 +202,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
           <Button size="sm" onClick={async () => {
             try {
               const forms = (await Promise.all(
-                sizings.map((s) => api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`).then((r) => r.data).catch(() => null))
+                sizings.map((s) => api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`)).then((r) => r.data).catch(() => null))
               )).filter(Boolean);
               const data = { project_name: projectName, forms };
               const endpoint = `/api/approvals/${pendingForMe.ticket_id}/${pendingForMe.action === "revise" ? "revise" : "resubmit"}`;
@@ -236,7 +246,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                 className={`cursor-pointer hover:bg-accent ${selected === s.sr_no ? "bg-primary/20" : ""}`}
                 onClick={() => setSelected(s.sr_no)}
                 onDoubleClick={() =>
-                  router.push(`/dashboard/sizing/${encodeURIComponent(projectName)}/${s.sr_no}`)
+                  router.push(withOwnerLink(`/dashboard/sizing/${encodeURIComponent(projectName)}/${s.sr_no}`))
                 }
               >
                 <td className="text-center py-2 px-4">{s.sr_no}</td>
@@ -278,7 +288,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
             const row = sizings.find((s) => s.sr_no === selected);
             try {
               const data = await api.get(
-                `/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selected}`
+                withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selected}`)
               ).then((r) => r.data);
               setDirectLinkData({
                 export_type: "sizing_excel",
@@ -411,13 +421,13 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
               try {
                 let name: string; let data: any;
                 if (sr != null) {
-                  const r = await api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`);
+                  const r = await api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`));
                   const row = sizings.find((s) => s.sr_no === sr);
                   name = `${projectName} — Sr. ${sr}${row?.offered_battery_config ? ` (${row.offered_battery_config})` : ""}`;
                   data = { project_name: projectName, form: r.data };
                 } else {
                   const forms = (await Promise.all(
-                    sizings.map((s) => api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`).then((r) => r.data).catch(() => null))
+                    sizings.map((s) => api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`)).then((r) => r.data).catch(() => null))
                   )).filter(Boolean);
                   name = `${projectName} — All (${forms.length} sizing${forms.length !== 1 ? "s" : ""})`;
                   data = { project_name: projectName, forms };

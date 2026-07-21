@@ -19,6 +19,20 @@ interface PendingRow {
   assigned_to: string;
 }
 
+interface ExportRow {
+  id: number;
+  export_type?: string;
+  sol_no?: string;
+  quote_code?: string;
+  part_code?: string;
+}
+
+interface SolOption {
+  sol_no: string;
+  quote_code: string;
+  part_code: string;
+}
+
 export interface PendingExportData {
   export_type?: string;
   ups_make?: string;
@@ -103,6 +117,7 @@ export function PendingLinkDialog({ open, exportLabel, exportData, exportDataLis
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<PendingRow | null>(null);
+  const [solStep, setSolStep] = useState<{ pendingCode: string; exportId: number; options: SolOption[] } | null>(null);
 
   const { data: mine = [], isLoading } = useQuery<PendingRow[]>({
     queryKey: ["pending-mine-for-link"],
@@ -119,6 +134,7 @@ export function PendingLinkDialog({ open, exportLabel, exportData, exportDataLis
     : active;
 
   const isQuoteExport = exportData.export_type?.startsWith("quote_");
+  const isBulkExport = !!exportDataList && exportDataList.length > 0;
 
   const linkMut = useMutation({
     mutationFn: (row: PendingRow) => {
@@ -128,31 +144,108 @@ export function PendingLinkDialog({ open, exportLabel, exportData, exportDataLis
           pending_code,
           quote_code: exportData.quote_code ?? "",
           export_type: exportData.export_type,
-        });
+        }).then((r) => ({ data: r.data, pending_code }));
       }
-      if (exportDataList && exportDataList.length > 0) {
+      if (isBulkExport) {
         return api.post("/api/pending/my-exports/bulk", {
           pending_code,
           exports: exportDataList,
-        });
+        }).then((r) => ({ data: r.data, pending_code }));
       }
       return api.post("/api/pending/my-exports", {
         pending_code,
         ...exportData,
-      });
+      }).then((r) => ({ data: r.data, pending_code }));
     },
-    onSuccess: () => {
+    onSuccess: async ({ data, pending_code }) => {
       qc.invalidateQueries({ queryKey: ["pending-export-summary"] });
+
+      if (!isQuoteExport && !isBulkExport && data?.id) {
+        try {
+          const exports: ExportRow[] = await api
+            .get(`/api/pending/my-exports/${encodeURIComponent(pending_code)}`)
+            .then((r) => r.data);
+          const seen = new Set<string>();
+          const options: SolOption[] = [];
+          for (const e of exports) {
+            if (!e.export_type?.startsWith("quote_") || !e.sol_no) continue;
+            const key = `${e.quote_code}|${e.sol_no}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            options.push({ sol_no: String(e.sol_no), quote_code: String(e.quote_code || ""), part_code: String(e.part_code || "") });
+          }
+          if (options.length > 0) {
+            setSolStep({ pendingCode: pending_code, exportId: data.id, options });
+            return;
+          }
+        } catch {
+          // fall through to normal completion
+        }
+      }
+
       onDone();
       handleClose();
     },
   });
 
+  const solLinkMut = useMutation({
+    mutationFn: (sol_no: string) => {
+      if (!solStep) throw new Error("no export pending link");
+      return api.patch("/api/pending/my-exports/link", {
+        links: [{ pending_code: solStep.pendingCode, export_id: solStep.exportId, sol_no }],
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pending-export-summary"] });
+      setSolStep(null);
+      onDone();
+      handleClose();
+    },
+  });
+
+  const handleIndependent = () => {
+    setSolStep(null);
+    onDone();
+    handleClose();
+  };
+
   const handleClose = () => {
     setSearch("");
     setSelected(null);
+    setSolStep(null);
     onClose();
   };
+
+  if (solStep) {
+    return (
+      <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Link this export to a solution?</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-1">
+            Pick the solution this export belongs to, or mark it independent.
+          </p>
+          <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
+            {solStep.options.map((o) => (
+              <button
+                key={`${o.quote_code}|${o.sol_no}`}
+                type="button"
+                disabled={solLinkMut.isPending}
+                className="text-left px-3 py-2 rounded-md border border-transparent hover:bg-muted text-sm transition-colors"
+                onClick={() => solLinkMut.mutate(o.sol_no)}
+              >
+                {o.quote_code ? `${o.quote_code} · ` : ""}Sol {o.sol_no}{o.part_code ? ` · ${o.part_code}` : ""}
+              </button>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="w-full" disabled={solLinkMut.isPending} onClick={handleIndependent}>
+              {solLinkMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Independent"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>

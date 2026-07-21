@@ -57,7 +57,7 @@ const PRIORITY_ROW: Record<string, string> = {
 };
 
 const PRIORITY_LABELS: Record<string, string> = {
-  urgent: "Urgent", semi_urgent: "Semi Urgent", relaxed: "Relaxed",
+  urgent: "U", semi_urgent: "S", relaxed: "R",
 };
 
 const SIZING_KEYS = [
@@ -86,12 +86,11 @@ const EXPORT_CHIP: Record<string, string> = {
 
 type PendingFilterType = "text" | "select" | "date" | "time";
 const COLS: { key: keyof PendingRow | "completed"; label: string; w: number; filterType?: PendingFilterType; filterOptions?: { value: string; label: string }[]; sortable?: boolean }[] = [
-  { key: "inquiry_code",    label: "Inquiry Code",            w: 120, filterType: "text",   sortable: true },
-  { key: "status",          label: "Status",                  w: 105, filterType: "select", filterOptions: [{ value: "pending", label: "Pending" }, { value: "completed", label: "Completed" }], sortable: true },
-  { key: "priority",        label: "Priority",                w: 105, filterType: "select", filterOptions: [{ value: "urgent", label: "Urgent" }, { value: "semi_urgent", label: "Semi-Urgent" }, { value: "relaxed", label: "Relaxed" }], sortable: true },
+  { key: "inquiry_code",    label: "Inquiry Code",            w: 80,  filterType: "text",   sortable: true },
   { key: "received_date",   label: "Received Date",           w: 115, filterType: "date" },
+  { key: "status",          label: "Status",                  w: 70,  filterType: "select", filterOptions: [{ value: "pending", label: "Pending" }, { value: "completed", label: "Completed" }], sortable: true },
+  { key: "priority",        label: "Priority",                w: 70,  filterType: "select", filterOptions: [{ value: "urgent", label: "Urgent" }, { value: "semi_urgent", label: "Semi-Urgent" }, { value: "relaxed", label: "Relaxed" }], sortable: true },
   { key: "received_time",   label: "Received Time",           w: 105, filterType: "time" },
-  { key: "mail_for",        label: "Mail For",                w: 130, filterType: "text" },
   { key: "completed",       label: "Completed",               w: 220, sortable: true },
   { key: "oem_dealer",      label: "OEM / Dealer",            w: 150, filterType: "text" },
   { key: "end_customer",    label: "End Customer / Project",  w: 200, filterType: "text" },
@@ -265,6 +264,7 @@ export default function PendingPage() {
   const [globalActionRow, setGlobalActionRow] = useState<PendingRow | null>(null);
   const [restoringId, setRestoringId] = useState<number | null>(null);
   const [deleteExportId, setDeleteExportId] = useState<number | null>(null);
+  const [deleteRowTarget, setDeleteRowTarget] = useState<PendingRow | null>(null);
   const [sizingPickerExport, setSizingPickerExport] = useState<any | null>(null);
   const [sizingProject, setSizingProject] = useState("");
   const [completingId, setCompletingId] = useState<number | null>(null);
@@ -503,7 +503,7 @@ export default function PendingPage() {
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => api.delete(`/api/pending/${id}`),
-    onSuccess: () => { toast.success("Deleted"); invalidate(); },
+    onSuccess: () => { toast.success("Deleted"); setDeleteRowTarget(null); invalidate(); },
     onError: (e: any) => toast.error(apiErr(e, "Delete failed")),
   });
 
@@ -812,6 +812,8 @@ export default function PendingPage() {
               <tr>
                 {/* mark-complete button column — mine tab only */}
                 {tab === "mine" && <th className="px-2 py-2 w-8" />}
+                {isExpert && <th className="px-2 py-2 w-20">Assign</th>}
+                {isExpert && <th className="px-2 py-2 w-16">Del</th>}
                 {COLS.map((c) => (
                   <th key={c.key} style={{ minWidth: c.w }} className="text-left px-2 py-2 font-semibold whitespace-nowrap">
                     {c.sortable ? (
@@ -822,15 +824,13 @@ export default function PendingPage() {
                     ) : c.label}
                   </th>
                 ))}
-                {isExpert && <th className="px-2 py-2 w-20">Assign</th>}
-                {isExpert && <th className="px-2 py-2 w-16">Del</th>}
               </tr>
               <FilterRow
                 cols={COLS as any}
                 values={filterValues}
                 onField={setField}
-                prefixCells={tab === "mine" ? [{ width: 32 }] : []}
-                suffixCells={[
+                prefixCells={[
+                  ...(tab === "mine" ? [{ width: 32 }] : []),
                   ...(isExpert ? [{ width: 80 }] : []),
                   ...(isExpert ? [{ width: 64 }] : []),
                 ]}
@@ -873,6 +873,30 @@ export default function PendingPage() {
                       </td>
                     )}
 
+                    {isExpert && (
+                      <td className="px-2 py-1.5 text-center" onClick={(ev) => ev.stopPropagation()}>
+                        <button
+                          title="Assign to user"
+                          onClick={() => { setAssignRow(row); setAssignUser(row.assigned_to || ""); }}
+                          className="text-muted-foreground hover:text-primary"
+                        >
+                          <UserCheck size={14} />
+                        </button>
+                      </td>
+                    )}
+                    {isExpert && (
+                      <td className="px-2 py-1.5 text-center" onClick={(ev) => ev.stopPropagation()}>
+                        <button
+                          title="Delete"
+                          onClick={() => setDeleteRowTarget(row)}
+                          disabled={deleteMut.isPending}
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    )}
+
                     {COLS.map((c) => {
                       if (c.key === "priority") {
                         const canEdit = isExpert;
@@ -901,7 +925,7 @@ export default function PendingPage() {
                                   : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
                               )}
                             >
-                              {row.status === "completed" ? "Completed" : "Pending"}
+                              {row.status === "completed" ? "C" : "P"}
                             </button>
                           </td>
                         );
@@ -921,30 +945,6 @@ export default function PendingPage() {
                         </td>
                       );
                     })}
-
-                    {isExpert && (
-                      <td className="px-2 py-1.5 text-center">
-                        <button
-                          title="Assign to user"
-                          onClick={() => { setAssignRow(row); setAssignUser(row.assigned_to || ""); }}
-                          className="text-muted-foreground hover:text-primary"
-                        >
-                          <UserCheck size={14} />
-                        </button>
-                      </td>
-                    )}
-                    {isExpert && (
-                      <td className="px-2 py-1.5 text-center">
-                        <button
-                          title="Delete"
-                          onClick={() => deleteMut.mutate(row.id)}
-                          disabled={deleteMut.isPending}
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 );
               })}
@@ -1454,7 +1454,7 @@ export default function PendingPage() {
                   <option value="">— Unlinked</option>
                   {quoteParents.map((p: any) => (
                     <option key={p.sol_no} value={p.sol_no}>
-                      Sol {p.sol_no}{p.part_code ? ` · ${p.part_code}` : ""}
+                      {p.quote_code ? `${p.quote_code} · ` : ""}Sol {p.sol_no}{p.part_code ? ` · ${p.part_code}` : ""}
                     </option>
                   ))}
                 </select>
@@ -1561,7 +1561,6 @@ export default function PendingPage() {
           </DialogHeader>
           {(() => {
             const quoteExps = linkDialogAllExports.filter(e => e.export_type?.startsWith("quote_") && e.sol_no);
-            const multiQuote = new Set(quoteExps.map(e => String(e.quote_code || ""))).size > 1;
             // dedupe by sol_no+quote_code combo
             const seen = new Set<string>();
             const solOptions: { sol_no: string; quote_code: string; part_code: string }[] = [];
@@ -1570,7 +1569,7 @@ export default function PendingPage() {
               if (!seen.has(key)) { seen.add(key); solOptions.push({ sol_no: String(e.sol_no), quote_code: String(e.quote_code || ""), part_code: String(e.part_code || "") }); }
             }
             const solLabel = (o: typeof solOptions[0]) =>
-              multiQuote ? `${o.quote_code} Sol${o.sol_no} - ${o.part_code}` : `Sol${o.sol_no} - ${o.part_code}`;
+              `${o.quote_code ? `${o.quote_code} · ` : ""}Sol${o.sol_no} - ${o.part_code}`;
             return (
               <div className="flex flex-col gap-4 mt-1">
 
@@ -1663,6 +1662,25 @@ export default function PendingPage() {
               onClick={() => deleteExportId !== null && deleteExportMut.mutate(deleteExportId)}
             >
               {deleteExportMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteRowTarget !== null} onOpenChange={(o) => { if (!o) setDeleteRowTarget(null); }}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader><DialogTitle>Delete Entry?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to delete {deleteRowTarget?.inquiry_code ? `"${deleteRowTarget.inquiry_code}"` : `entry #${deleteRowTarget?.sr_no}`}? This can&apos;t be undone.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setDeleteRowTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={deleteMut.isPending}
+              onClick={() => deleteRowTarget !== null && deleteMut.mutate(deleteRowTarget.id)}
+            >
+              {deleteMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>

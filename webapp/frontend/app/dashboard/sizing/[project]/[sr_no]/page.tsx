@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api , apiErr } from "@/lib/api";
@@ -202,6 +202,10 @@ export default function SizingFormPage() {
   const srNo = parseInt(params.sr_no as string, 10);
   const router = useRouter();
   const qc = useQueryClient();
+  const searchParams = useSearchParams();
+  const owner = searchParams.get("owner") || "";
+  const ownerQS = owner ? `owner=${encodeURIComponent(owner)}` : "";
+  const withOwner = (url: string) => owner ? `${url}${url.includes("?") ? "&" : "?"}${ownerQS}` : url;
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const prevInputSig = useRef("");
@@ -211,9 +215,9 @@ export default function SizingFormPage() {
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "required">("idle");
 
   const { data: existing, isLoading } = useQuery({
-    queryKey: ["sizing", projectName, srNo],
+    queryKey: ["sizing", projectName, srNo, owner],
     queryFn: () =>
-      api.get(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${srNo}`).then((r) => r.data),
+      api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${srNo}`)).then((r) => r.data),
     retry: false,
   });
 
@@ -358,7 +362,7 @@ export default function SizingFormPage() {
   const saveMut = useMutation({
     mutationFn: () =>
       api.put(
-        `/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${srNo}`,
+        withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${srNo}`),
         {
           customer_name: form.customer_name,
           solution_provider: form.solution_provider,
@@ -566,10 +570,15 @@ setAddToQuoteOpen(false);
   return (
     <div className="flex flex-col h-full p-5 gap-4 overflow-auto">
       <div className="flex items-center gap-3">
-        <Button variant="outline" onClick={() => router.push(`/dashboard/sizing/${encodeURIComponent(projectName)}`)}>
+        <Button variant="outline" onClick={() => router.push(owner ? `/dashboard/sizing/${encodeURIComponent(projectName)}?${ownerQS}` : `/dashboard/sizing/${encodeURIComponent(projectName)}`)}>
           ← Back
         </Button>
         <h1 className="text-2xl font-bold">{projectName} — Sr. {srNo}</h1>
+        {owner && (
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300">
+            Viewing {owner}&apos;s sizing
+          </span>
+        )}
         {autoSaveStatus === "saving" && <span className="text-xs text-muted-foreground">Saving…</span>}
         {autoSaveStatus === "saved" && <span className="text-xs text-green-600">Saved</span>}
         {autoSaveStatus === "required" && <span className="text-xs text-amber-500">Customer Name &amp; Solution Provider are required</span>}

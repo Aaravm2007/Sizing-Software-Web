@@ -132,18 +132,34 @@ def init_db():
 
 
 def log_export(inquiry_code: str, exported_by: str, data: dict) -> int:
+    """Upsert keyed on (inquiry_code, exported_by, exported_at) — re-syncing an
+    export whose data changed (e.g. sol_no relinked) overwrites the stale row
+    instead of being silently ignored."""
     allowed = [k for k in _DATA_COLS if k in data]
     ts = data.get("exported_at") or int(time.time() * 1000)
     cols = ["inquiry_code", "exported_by", "exported_at"] + allowed
     vals = [inquiry_code, exported_by, ts] + [data[k] for k in allowed]
     cols_sql = ", ".join(cols)
     ph = ", ".join("?" * len(vals))
+    update_sql = ", ".join(f'"{k}" = excluded."{k}"' for k in allowed)
     with _conn() as c:
         cur = c.execute(
-            f"INSERT OR IGNORE INTO export_history ({cols_sql}) VALUES ({ph})",
+            f"""INSERT INTO export_history ({cols_sql}) VALUES ({ph})
+                ON CONFLICT(inquiry_code, exported_by, exported_at)
+                DO UPDATE SET {update_sql}""" if allowed else
+            f"""INSERT INTO export_history ({cols_sql}) VALUES ({ph})
+                ON CONFLICT(inquiry_code, exported_by, exported_at) DO NOTHING""",
             vals,
         )
         return cur.lastrowid
+
+
+def delete_export(inquiry_code: str, exported_by: str, exported_at: int):
+    with _conn() as c:
+        c.execute(
+            "DELETE FROM export_history WHERE inquiry_code = ? AND exported_by = ? AND exported_at = ?",
+            (inquiry_code, exported_by, exported_at),
+        )
 
 
 def list_by_code(inquiry_code: str) -> list:

@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from auth import get_current_user, get_expert_user
 from pending_db import push_row, list_rows, list_mine, update_row, delete_row, init_db, suggest_next_inquiry_code
 from pending_user_db import init_item_table, log_export, log_export_bulk, list_exports, list_all_tables, export_summary_all, update_export_sol_no, update_export_parent, clear_export_link, delete_export
-from pending_full_db import init_db as init_full_db, log_export as full_log_export, list_by_code as full_list_by_code, export_summary_global
+from pending_full_db import init_db as init_full_db, log_export as full_log_export, list_by_code as full_list_by_code, export_summary_global, delete_export as full_delete_export
 from user_db import get_user_pending_db, get_user_inquiry_db, get_user_temp_db
 
 init_db()
@@ -91,13 +91,23 @@ def set_priority(row_id: int, body: PriorityBody, _=Depends(get_expert_user)):
     return {"detail": "updated"}
 
 
+def _is_expert(user: dict) -> bool:
+    """user (from get_current_user) is just the decoded JWT — it carries no role
+    claim, so expert-ness must be resolved the same way get_expert_user() does."""
+    try:
+        get_expert_user(user)
+        return True
+    except HTTPException:
+        return False
+
+
 @router.patch("/{row_id}/status")
 def set_status(row_id: int, body: StatusBody, user=Depends(get_current_user)):
     rows = list_rows()
     row = next((r for r in rows if r["id"] == row_id), None)
     if not row:
         raise HTTPException(404, "Not found")
-    if user.get("role") != "expert" and row.get("assigned_to") != user["username"]:
+    if not _is_expert(user) and row.get("assigned_to") != user["username"]:
         raise HTTPException(403, "Not authorized to change this row's status")
     update_row(row_id, {"status": body.status})
     return {"detail": "updated"}
@@ -118,7 +128,7 @@ def mark_complete(row_id: int, body: CompleteBody = CompleteBody(), user=Depends
     row = next((r for r in rows if r["id"] == row_id), None)
     if not row:
         raise HTTPException(404, "Not found")
-    if user.get("role") != "expert" and row.get("assigned_to") != user["username"]:
+    if not _is_expert(user) and row.get("assigned_to") != user["username"]:
         raise HTTPException(403, "Not authorized to complete this row")
 
     inquiry_code = row.get("inquiry_code") or str(row.get("sr_no", row_id))
@@ -494,6 +504,23 @@ def export_from_quote(body: ExportFromQuoteBody, user=Depends(get_current_user))
     return {"count": count}
 
 
+# ── keep the global export-history snapshot in sync after completion ─────────
+# (mark_complete() only copies "mine" -> global once; without this, any later
+# link/unlink/delete on an already-completed item goes stale in the global view)
+
+def _is_completed(pending_code: str) -> bool:
+    rows = list_rows()
+    row = next((r for r in rows if (r.get("inquiry_code") or str(r.get("sr_no"))) == pending_code), None)
+    return bool(row and row.get("status") == "completed")
+
+
+def _resync_full(pending_code: str, username: str, db_path: str):
+    if not _is_completed(pending_code):
+        return
+    for exp in list_exports(pending_code, db_path):
+        full_log_export(pending_code, username, exp)
+
+
 # ── link datasheet/GAD exports to a sol_no ────────────────────────────────────
 
 class LinkItem(BaseModel):
@@ -509,6 +536,7 @@ class LinkBody(BaseModel):
 @router.patch("/my-exports/link")
 def link_exports(body: LinkBody, user=Depends(get_current_user)):
     db_path = get_user_pending_db(user["username"])
+    touched_codes: set[str] = set()
     for item in body.links:
         try:
             all_exps = list_exports(item.pending_code, db_path)
@@ -526,8 +554,11 @@ def link_exports(body: LinkBody, user=Depends(get_current_user)):
             if parents:
                 latest_parent = sorted(parents, key=lambda e: e.get("exported_at", 0), reverse=True)[0]
                 update_export_parent(item.pending_code, item.export_id, latest_parent["id"], db_path)
+            touched_codes.add(item.pending_code)
         except Exception:
             pass
+    for code in touched_codes:
+        _resync_full(code, user["username"], db_path)
     return {"detail": "linked", "count": len(body.links)}
 
 
@@ -539,11 +570,16 @@ class UnlinkBody(BaseModel):
 def unlink_export(body: UnlinkBody, user=Depends(get_current_user)):
     db_path = get_user_pending_db(user["username"])
     clear_export_link(body.pending_code, body.export_id, db_path)
+    _resync_full(body.pending_code, user["username"], db_path)
     return {"detail": "unlinked"}
 
 
 @router.delete("/my-exports/{export_id}")
 def delete_export_entry(export_id: int, pending_code: str, user=Depends(get_current_user)):
     db_path = get_user_pending_db(user["username"])
+    if _is_completed(pending_code):
+        target = next((e for e in list_exports(pending_code, db_path) if e["id"] == export_id), None)
+        if target and target.get("exported_at"):
+            full_delete_export(pending_code, user["username"], target["exported_at"])
     delete_export(pending_code, export_id, db_path)
     return {"detail": "deleted"}
