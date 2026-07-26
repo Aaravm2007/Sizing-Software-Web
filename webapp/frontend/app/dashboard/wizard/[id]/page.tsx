@@ -8,7 +8,7 @@ import { runCalculation } from "@/lib/sizingEngine";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Clipboard, Calculator, ChevronDown, ChevronRight, Download, Plus, X } from "lucide-react";
+import { Clipboard, Calculator, ChevronDown, ChevronRight, Download, Plus, X, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { cn } from "@/lib/utils";
 import {
@@ -73,6 +73,8 @@ interface ColState {
   costing_rows: any[];
   costing_loading: boolean;
   in_quote: boolean;
+  quote_code?: string;
+  quote_sr_no?: number;
 }
 
 const EMPTY_COL = (): ColState => ({
@@ -145,8 +147,10 @@ export default function WizardComparePage() {
   const [resultIdx,      setResultIdx]      = useState<number[]>([]);
   // quote flow
   const [quoteCode,      setQuoteCode]      = useState("");
-  const [quoteDialog,    setQuoteDialog]    = useState<"format" | "margin" | null>(null);
+  const [quoteDialog,    setQuoteDialog]    = useState<"format" | "margin" | "picker" | null>(null);
   const [pendingCol,     setPendingCol]     = useState<number | null>(null);
+  const [removeColTarget, setRemoveColTarget] = useState<number | null>(null);
+  const [removingCol,    setRemovingCol]    = useState(false);
   // format dialog fields
   const [qCode,          setQCode]          = useState("");
   const [qDate,          setQDate]          = useState(() => new Date().toISOString().slice(0, 10));
@@ -221,16 +225,18 @@ export default function WizardComparePage() {
       setCalcDone(data.calc_done || false);
       setCostingDone(data.costing_done || false);
       setGroups(Array.isArray(data.groups) ? data.groups : []);
-      if (data.quote_code) {
-        setQuoteCode(data.quote_code);
-        // verify quote still exists; if deleted, clear all in_quote flags
+      // verify every quote referenced by any column still exists; clear only the columns whose quote is gone
+      const usedCodes = Array.from(new Set(loadedCols.map((c: ColState) => c.quote_code).filter(Boolean)));
+      if (usedCodes.length) {
         api.get("/api/quotation/quotes").then(res => {
-          const exists = (res.data as any[]).some(q => q.code === data.quote_code);
-          if (!exists) {
-            setQuoteCode("");
-            setCols(prev => prev.map(c => ({ ...c, in_quote: false })));
-            setSelectedCols(prev => prev.map(() => false));
-          }
+          const existing = new Set((res.data as any[]).map(q => q.code));
+          const fixed = loadedCols.map((c: ColState) =>
+            c.quote_code && !existing.has(c.quote_code)
+              ? { ...c, in_quote: false, quote_code: undefined, quote_sr_no: undefined }
+              : c
+          );
+          setCols(fixed);
+          setSelectedCols(fixed.map((c: ColState) => c.in_quote ?? false));
         }).catch(() => {});
       }
     } else {
@@ -245,10 +251,10 @@ export default function WizardComparePage() {
     if (!cols.length) return;
     localStorage.setItem(`wizard_data_${id}`, JSON.stringify({
       customer_name: customerName, solution_provider: solutionProvider,
-      cols, calc_done: calcDone, costing_done: costingDone, quote_code: quoteCode,
+      cols, calc_done: calcDone, costing_done: costingDone,
       groups,
     }));
-  }, [customerName, solutionProvider, cols, calcDone, costingDone, quoteCode, groups, id]);
+  }, [customerName, solutionProvider, cols, calcDone, costingDone, groups, id]);
 
   // ── helpers ───────────────────────────────────────────────────────────────
   const updateCol = (i: number, patch: Partial<ColState>) =>
@@ -351,23 +357,50 @@ export default function WizardComparePage() {
   };
 
   // ── checkbox handler ─────────────────────────────────────────────────────
+  const usedQuoteCodes = Array.from(new Set(cols.map(c => c.quote_code).filter(Boolean))) as string[];
+
   const handleCheck = async (i: number, checked: boolean) => {
     if (!checked) {
-      if (cols[i]?.in_quote) return; // stays checked until quote is deleted
+      if (cols[i]?.in_quote) { setRemoveColTarget(i); return; } // confirm before removing
       setSelectedCols(prev => { const a = [...prev]; a[i] = false; return a; });
       return;
     }
     setSelectedCols(prev => { const a = [...prev]; a[i] = true; return a; });
     setPendingCol(i);
-    if (!quoteCode) {
-      // first sizing checked — need quote format
+    if (usedQuoteCodes.length === 0) {
+      // no quote active in this session yet — need quote format
       try {
         const res = await api.get("/api/quotation/next-code");
         setQCode(res.data.code || "");
       } catch { setQCode(""); }
       setQuoteDialog("format");
     } else {
-      setQuoteDialog("margin");
+      // one or more quotes already active this session — ask which one
+      setQuoteDialog("picker");
+    }
+  };
+
+  const handleConfirmRemoveFromQuote = async () => {
+    if (removeColTarget === null) return;
+    const i = removeColTarget;
+    const col = cols[i];
+    if (!col.quote_code || col.quote_sr_no == null) {
+      updateCol(i, { in_quote: false, quote_code: undefined, quote_sr_no: undefined });
+      setSelectedCols(prev => { const a = [...prev]; a[i] = false; return a; });
+      setRemoveColTarget(null);
+      return;
+    }
+    setRemovingCol(true);
+    try {
+      await api.delete(`/api/quotation/quotes/${col.quote_code}/systems/${col.quote_sr_no}`);
+      updateCol(i, { in_quote: false, quote_code: undefined, quote_sr_no: undefined });
+      setSelectedCols(prev => { const a = [...prev]; a[i] = false; return a; });
+      toast.success(`Sizing ${i + 1} removed from quote ${col.quote_code}`);
+      setRemoveColTarget(null);
+    } catch (e) {
+      toast.error(apiErr(e, "Failed to remove from quote"));
+    } finally {
+      setRemovingCol(false);
     }
   };
 
@@ -417,7 +450,7 @@ export default function WizardComparePage() {
         ups_rating_kva:    uKva,
         calculated_load_kw: cKw,
       });
-      updateCol(pendingCol, { in_quote: true });
+      updateCol(pendingCol, { in_quote: true, quote_code: quoteCode, quote_sr_no: res.data.sr_no });
       toast.success(`Sizing ${pendingCol + 1} added to quote ${quoteCode} (Sr ${res.data.sr_no}) — view in Quotations`);
     } catch (e: any) {
       setSelectedCols(prev => { const a = [...prev]; a[pendingCol] = false; return a; });
@@ -858,7 +891,7 @@ export default function WizardComparePage() {
               >
                 Field
               </th>
-              {cols.map((_, i) => (
+              {cols.map((col, i) => (
                 <th
                   key={i}
                   style={{ width: COL_W, minWidth: COL_W }}
@@ -883,6 +916,11 @@ export default function WizardComparePage() {
                       {getColGroup(i) && (
                         <span className="text-[9px] bg-primary/20 text-primary px-1 py-0.5 rounded-full leading-none">
                           {getColGroup(i)!.name}
+                        </span>
+                      )}
+                      {col.in_quote && col.quote_code && (
+                        <span className="text-[9px] bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 px-1 py-0.5 rounded-full leading-none">
+                          {col.quote_code}
                         </span>
                       )}
                     </label>
@@ -1285,7 +1323,37 @@ export default function WizardComparePage() {
         </table>
       </div>
 
-      {/* ── Dialog 1: Quote format (first sizing checked) ── */}
+      {/* ── Dialog 0: which quote (when at least one is already active this session) ── */}
+      <Dialog open={quoteDialog === "picker"} onOpenChange={open => { if (!open) { setQuoteDialog(null); setPendingCol(null); setSelectedCols(prev => { const a = [...prev]; if (pendingCol !== null) a[pendingCol] = false; return a; }); } }}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader><DialogTitle>Add to which quote?</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-1.5 py-1">
+            {usedQuoteCodes.map(code => (
+              <button key={code} type="button"
+                className="text-left px-3 py-2 rounded-md border border-transparent hover:bg-muted text-sm transition-colors"
+                onClick={() => { setQuoteCode(code); setQuoteDialog("margin"); }}>
+                {code}
+              </button>
+            ))}
+            <button type="button"
+              className="text-left px-3 py-2 rounded-md border border-dashed hover:bg-muted text-sm text-primary transition-colors"
+              onClick={async () => {
+                try {
+                  const res = await api.get("/api/quotation/next-code");
+                  setQCode(res.data.code || "");
+                } catch { setQCode(""); }
+                setQuoteDialog("format");
+              }}>
+              + New Quote
+            </button>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => { setQuoteDialog(null); setPendingCol(null); setSelectedCols(prev => { const a = [...prev]; if (pendingCol !== null) a[pendingCol] = false; return a; }); }}>Cancel</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog 1: Quote format (creating a brand-new quote) ── */}
       <Dialog open={quoteDialog === "format"} onOpenChange={open => { if (!open) { setQuoteDialog(null); setPendingCol(null); setSelectedCols(prev => { const a = [...prev]; if (pendingCol !== null) a[pendingCol] = false; return a; }); } }}>
         <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>New Quote</DialogTitle></DialogHeader>
@@ -1360,6 +1428,23 @@ export default function WizardComparePage() {
           <DialogFooter>
             <Button variant="ghost" onClick={() => { setQuoteDialog(null); setPendingCol(null); setSelectedCols(prev => { const a = [...prev]; if (pendingCol !== null) a[pendingCol] = false; return a; }); }}>Cancel</Button>
             <Button onClick={handleAddToQuote}>Add to Quote</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={removeColTarget !== null} onOpenChange={o => { if (!o && !removingCol) setRemoveColTarget(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Remove from Quote?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This will remove Sizing {removeColTarget !== null ? removeColTarget + 1 : ""} — along with any
+            modular battery racks and custom costs added for it — from Quote{" "}
+            {removeColTarget !== null ? cols[removeColTarget]?.quote_code : ""}. This can&apos;t be undone.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" disabled={removingCol} onClick={() => setRemoveColTarget(null)}>Cancel</Button>
+            <Button variant="destructive" disabled={removingCol} onClick={handleConfirmRemoveFromQuote}>
+              {removingCol ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Remove"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

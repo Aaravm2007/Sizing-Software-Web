@@ -136,7 +136,8 @@ def _inr(amount: float) -> str:
             rest = rest[:-2] if len(rest) > 2 else ""
         groups.reverse()
         formatted = ",".join(groups) + "," + last3
-    return ("-" if neg else "") + formatted + "." + decimal_part
+    decimals = "" if decimal_part == "00" else "." + decimal_part
+    return ("-" if neg else "") + formatted + decimals
 
 
 def _generate_docx(quote_code: str, db_path: str = None) -> str:
@@ -452,6 +453,62 @@ def delete_item(code: str, sr_no: int, user=Depends(get_current_user)):
     except Exception:
         pass
     return {"detail": "deleted"}
+
+
+@router.delete("/quotes/{code}/systems/{sr_no}")
+def delete_system(code: str, sr_no: int, user=Depends(get_current_user)):
+    """Delete a system/solution row plus every modular-rack and custom-cost row
+    that belongs to it. Ownership isn't tracked by a foreign key (rack/custom
+    rows are stored with sol_no="-"), so it's inferred by position: everything
+    between this system row and the next system row is "its" — the same
+    adjacency rule inquiry_db.sync_inquiry_for_quote already relies on."""
+    tdb = get_user_temp_db(user["username"])
+    rows = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]  # ordered by sr_no ASC
+
+    target = next((r for r in rows if str(r["sr_no"]) == str(sr_no)), None)
+    if not target:
+        raise HTTPException(404, "System row not found")
+    if str(target.get("item_type") or "system") != "system":
+        raise HTTPException(400, "Row is not a system/solution row")
+
+    target_sr = int(target["sr_no"])
+    next_sys_sr = min(
+        (int(r["sr_no"]) for r in rows
+         if str(r.get("item_type") or "system") == "system" and int(r["sr_no"]) > target_sr),
+        default=None,
+    )
+
+    def _owned(r) -> bool:
+        rsr = int(r["sr_no"])
+        if rsr == target_sr:
+            return True
+        if str(r.get("item_type") or "system") == "system":
+            return False
+        return rsr > target_sr and (next_sys_sr is None or rsr < next_sys_sr)
+
+    survivors = [r for r in rows if not _owned(r)]
+
+    clear_quotedata_table(code, tdb)
+    new_sr = 0
+    for d in survivors:
+        new_sr += 1
+        add_product_quote(
+            code, d["code"], d["format"], d["date"], d["solution_provider"],
+            d["customer_name"], new_sr, d["sol_no"], d["ups_rating"],
+            d["backup_requirement"], d["calc_load"], d["celltype"],
+            d["centre_tapping"], d["batterypartcode"], d["backup_time"],
+            d["quantity"], d["quote_price"], d["modular_rack"],
+            item_type=d.get("item_type") or "system", ageing_type=d.get("ageing_type") or "BOL", db_path=tdb,
+        )
+    try:
+        from inquiry_db import sync_inquiry_for_quote as _sync_inq, delete_by_quote_sol as _inq_del_sol
+        user_inq_db = get_user_inquiry_db(user["username"])
+        _inq_del_sol(code, str(target.get("sol_no", "")), db_path=user_inq_db)
+        updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
+        _sync_inq(code, updated, db_path=user_inq_db)
+    except Exception:
+        pass
+    return {"detail": "deleted", "removed": len(rows) - len(survivors)}
 
 
 # ── add from costing ──────────────────────────────────────────────────────────
