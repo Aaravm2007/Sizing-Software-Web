@@ -1,428 +1,205 @@
-import sqlite3
-import os
-import sys
+from pathlib import Path
 
-def get_connection(db_path=None):
-    if db_path:
-        return sqlite3.connect(db_path)
-    if getattr(sys, 'frozen', False):
-        db_path = os.path.join(os.path.dirname(sys.executable), "sizing.db")
-    else:
-        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sizing.db")
-    return sqlite3.connect(db_path)
+from pg import get_conn
+
+# db_path values are legacy per-user sqlite paths (data/{username}/sizing.db),
+# now used only as scope tokens; each legacy table-per-project becomes rows in
+# the shared sizings table keyed by (username, project_name).
+
+# column order callers rely on when unpacking fetch_sizing_by_sr tuples
+_FIELDS = [
+    "sr_no", "customer_name", "solution_provider", "ups_make", "ups_model",
+    "ups_rating_kva", "actual_load_kva", "actual_load_kw", "power_factor",
+    "inverter_efficiency", "nominal_dc_voltage", "backup_requirement_min",
+    "ageing_fraction", "design_margin_percent", "dod_margin_percent",
+    "derating_factor_percent", "number_of_cells", "cell_chemistry",
+    "calculated_load_kw", "max_charging_voltage", "end_cell_voltage",
+    "energy_required_kwh", "capacity_required_ah", "cap_with_ageing_ah",
+    "cap_with_design_margin_ah", "cap_with_dod_margin_ah",
+    "cap_with_derating_factor_ah", "nearest_capacity_ah",
+    "offered_battery_config", "total_available_energy_kwh", "backup_time_min",
+    "ageing_type",
+]
+
+# data-dict keys in insert/update order (parallel to _FIELDS[1:])
+_DATA_KEYS = [
+    "Customer Name", "Solution Provider", "UPS Make", "UPS Model",
+    "UPS Rating (KVA)", "Actual Load (KVA)", "Actual Load (kW)", "Power Factor",
+    "Inverter Efficiency", "Nominal DC Voltage (V)", "Backup Requirement (Min)",
+    "Ageing (%)", "Design Margin (%)", "DOD Margin (%)", "Derating Factor (%)",
+    "Number of Cells", "Cell Chemistry", "Calculated Load (kW)",
+    "Max Charging Voltage (V)", "End Cell Voltage (V)", "Energy Required (kWh)",
+    "Capacity Required (Ah)", "Cap req w/ Ageing (Ah)", "Cap req w/ Design Margin (Ah)",
+    "Cap req w/ DOD (Ah)", "Cap req w/ Derating (Ah)", "Nearest Available Capacity (Ah)",
+    "Offered Battery Configuration", "Total Available Energy (kWh)", "Backup Time (Min)",
+]
 
 
-# -------------------------------------------------
-# INIT (AUTO-CREATE TABLE)
-# -------------------------------------------------
+def _user(db_path=None) -> str:
+    return "" if db_path is None else Path(db_path).parent.name
+
+
+def _values(data: dict) -> list:
+    return [data.get(k) if k in ("Cap req w/ Ageing (Ah)",) else data[k] for k in _DATA_KEYS] + [
+        data.get("Ageing Type", "BOL")
+    ]
+
 
 def init_sizing_db(table_name, db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-
-    cur.execute(f"""
-        CREATE TABLE IF NOT EXISTS "{table_name}" (
-            sr_no INTEGER PRIMARY KEY,
-            customer_name TEXT,
-            solution_provider TEXT,
-            ups_make TEXT,
-            ups_model TEXT,
-            ups_rating_kva REAL,
-            actual_load_kva REAL,
-            actual_load_kw REAL,
-            power_factor REAL,
-            inverter_efficiency REAL,
-            nominal_dc_voltage REAL,
-            backup_requirement_min REAL,
-            ageing_fraction REAL,
-            design_margin_percent REAL,
-            dod_margin_percent REAL,
-            derating_factor_percent REAL,
-            number_of_cells INTEGER,
-            cell_chemistry TEXT,
-            calculated_load_kw REAL,
-            max_charging_voltage REAL,
-            end_cell_voltage REAL,
-            energy_required_kwh REAL,
-            capacity_required_ah REAL,
-            cap_with_ageing_ah REAL,
-            cap_with_design_margin_ah REAL,
-            cap_with_dod_margin_ah REAL,
-            cap_with_derating_factor_ah REAL,
-            nearest_capacity_ah REAL,
-            offered_battery_config TEXT,
-            total_available_energy_kwh REAL,
-            backup_time_min REAL,
-            ageing_type TEXT DEFAULT 'BOL',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    with get_conn() as conn:
+        conn.cursor().execute(
+            "INSERT INTO sizing_projects (username, project_name) VALUES (%s, %s)"
+            " ON CONFLICT (username, project_name) DO NOTHING",
+            (_user(db_path), table_name),
         )
-    """)
-
-    # Check if ageing_type column exists (for upgrading existing tables)
-    cur.execute(f"PRAGMA table_info(\"{table_name}\")")
-    columns = [row[1] for row in cur.fetchall()]
-    if 'ageing_type' not in columns:
-        cur.execute(f"ALTER TABLE \"{table_name}\" ADD COLUMN ageing_type TEXT DEFAULT 'BOL'")
-    if 'cap_with_ageing_ah' not in columns:
-        cur.execute(f"ALTER TABLE \"{table_name}\" ADD COLUMN cap_with_ageing_ah REAL")
-
-    conn.commit()
-    conn.close()
 
 
-def validate_table(cur, table_name):
-    cur.execute("""
-        SELECT name
-        FROM sqlite_master
-        WHERE type='table'
-          AND name = ?;
-    """, (table_name,))
+def validate_table(cur, table_name, username):
+    cur.execute(
+        "SELECT 1 FROM sizing_projects WHERE username = %s AND project_name = %s",
+        (username, table_name),
+    )
     if cur.fetchone() is None:
         raise ValueError(f"Invalid table name: {table_name}")
 
 
-
-# -------------------------------------------------
-# HELPERS
-# -------------------------------------------------
-
-def get_next_sr_no(cur, table_name):
-    validate_table(cur, table_name)
-    cur.execute(f'SELECT COALESCE(MAX(sr_no), 0) + 1 FROM "{table_name}"')
+def _next_sr_no(cur, username, table_name) -> int:
+    cur.execute(
+        "SELECT COALESCE(MAX(sr_no), 0) + 1 FROM sizings WHERE username = %s AND project_name = %s",
+        (username, table_name),
+    )
     return cur.fetchone()[0]
 
 
-def renumber_sr_no(cur, table_name):
-    validate_table(cur, table_name)
-    cur.execute(f"""
-        WITH ordered AS (
-            SELECT sr_no, ROW_NUMBER() OVER (ORDER BY sr_no) AS new_sr
-            FROM "{table_name}"
-        )
-        UPDATE "{table_name}"
-        SET sr_no = (
-            SELECT new_sr
-            FROM ordered
-            WHERE ordered.sr_no = "{table_name}".sr_no
-        )
-    """)
+def _renumber(cur, username, table_name):
+    """Compact sr_no to 1..N (two-pass to dodge the unique constraint)."""
+    cur.execute(
+        """UPDATE sizings s SET sr_no = -o.new_sr
+           FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sr_no) AS new_sr
+                 FROM sizings WHERE username = %s AND project_name = %s) o
+           WHERE s.id = o.id""",
+        (username, table_name),
+    )
+    cur.execute(
+        "UPDATE sizings SET sr_no = -sr_no WHERE username = %s AND project_name = %s AND sr_no < 0",
+        (username, table_name),
+    )
+
 
 def fetch_max_sr_no(table_name, db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    validate_table(cur, table_name)
+    username = _user(db_path)
+    with get_conn() as conn:
+        cur = conn.cursor()
+        validate_table(cur, table_name, username)
+        cur.execute(
+            "SELECT COALESCE(MAX(sr_no), 0) FROM sizings WHERE username = %s AND project_name = %s",
+            (username, table_name),
+        )
+        return cur.fetchone()[0]
 
-    cur.execute(f'SELECT COALESCE(MAX(sr_no), 0) FROM "{table_name}"')
-    max_sr_no = cur.fetchone()[0]
-    conn.close()
-    return max_sr_no
-
-# -------------------------------------------------
-# FETCH
-# -------------------------------------------------
 
 def fetch_all_sizings(table_name, db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    validate_table(cur, table_name)
-
-    cur.execute(f"""
-        SELECT sr_no, offered_battery_config
-        FROM "{table_name}"
-        ORDER BY sr_no
-    """)
-
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
+    username = _user(db_path)
+    with get_conn() as conn:
+        cur = conn.cursor()
+        validate_table(cur, table_name, username)
+        cur.execute(
+            "SELECT sr_no, offered_battery_config FROM sizings"
+            " WHERE username = %s AND project_name = %s ORDER BY sr_no",
+            (username, table_name),
+        )
+        return cur.fetchall()
 
 
 def fetch_sizing_by_sr(table_name, sr_no, db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    validate_table(cur, table_name)
+    username = _user(db_path)
+    cols = ", ".join(_FIELDS) + ", created_at::text"
+    with get_conn() as conn:
+        cur = conn.cursor()
+        validate_table(cur, table_name, username)
+        cur.execute(
+            f"SELECT {cols} FROM sizings"
+            " WHERE username = %s AND project_name = %s AND sr_no = %s",
+            (username, table_name, sr_no),
+        )
+        return cur.fetchone()
 
-    cur.execute(f"""
-        SELECT
-            sr_no,
-            customer_name,
-            solution_provider,
-            ups_make,
-            ups_model,
-            ups_rating_kva,
-            actual_load_kva,
-            actual_load_kw,
-            power_factor,
-            inverter_efficiency,
-            nominal_dc_voltage,
-            backup_requirement_min,
-            ageing_fraction,
-            design_margin_percent,
-            dod_margin_percent,
-            derating_factor_percent,
-            number_of_cells,
-            cell_chemistry,
-            calculated_load_kw,
-            max_charging_voltage,
-            end_cell_voltage,
-            energy_required_kwh,
-            capacity_required_ah,
-            cap_with_ageing_ah,
-            cap_with_design_margin_ah,
-            cap_with_dod_margin_ah,
-            cap_with_derating_factor_ah,
-            nearest_capacity_ah,
-            offered_battery_config,
-            total_available_energy_kwh,
-            backup_time_min,
-            ageing_type,
-            created_at
-        FROM "{table_name}"
-        WHERE sr_no=?
-    """, (sr_no,))
-
-    row = cur.fetchone()
-    conn.close()
-    return row
 
 def fetch_all_projects(db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT name
-        FROM sqlite_master
-        WHERE type='table'
-          AND name NOT LIKE 'sqlite_%';
-    """)
-    tables = [row[0] for row in cur.fetchall()]
-    conn.close()
-    return tables
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT project_name FROM sizing_projects WHERE username = %s ORDER BY id",
+            (_user(db_path),),
+        )
+        return [r[0] for r in cur.fetchall()]
 
-# -------------------------------------------------
-# INSERT
-# -------------------------------------------------
 
 def insert_sizing(table_name, data, db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    validate_table(cur, table_name)
+    username = _user(db_path)
+    with get_conn() as conn:
+        cur = conn.cursor()
+        validate_table(cur, table_name, username)
+        sr_no = _next_sr_no(cur, username, table_name)
+        cols = ", ".join(_FIELDS)
+        ph = ", ".join(["%s"] * (len(_FIELDS) + 2))
+        cur.execute(
+            f"INSERT INTO sizings (username, project_name, {cols}) VALUES ({ph})",
+            [username, table_name, sr_no] + _values(data),
+        )
+        return sr_no
 
-    sr_no = get_next_sr_no(cur, table_name)
-
-    cur.execute(f"""
-        INSERT INTO "{table_name}" (
-            sr_no,
-            customer_name,
-            solution_provider,
-            ups_make,
-            ups_model,
-            ups_rating_kva,
-            actual_load_kva,
-            actual_load_kw,
-            power_factor,
-            inverter_efficiency,
-            nominal_dc_voltage,
-            backup_requirement_min,
-            ageing_fraction,
-            design_margin_percent,
-            dod_margin_percent,
-            derating_factor_percent,
-            number_of_cells,
-            cell_chemistry,
-            calculated_load_kw,
-            max_charging_voltage,
-            end_cell_voltage,
-            energy_required_kwh,
-            capacity_required_ah,
-            cap_with_ageing_ah,
-            cap_with_design_margin_ah,
-            cap_with_dod_margin_ah,
-            cap_with_derating_factor_ah,
-            nearest_capacity_ah,
-            offered_battery_config,
-            total_available_energy_kwh,
-            backup_time_min,
-            ageing_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        sr_no,
-        data["Customer Name"],
-        data["Solution Provider"],
-        data["UPS Make"],
-        data["UPS Model"],
-        data["UPS Rating (KVA)"],
-        data["Actual Load (KVA)"],
-        data["Actual Load (kW)"],
-        data["Power Factor"],
-        data["Inverter Efficiency"],
-        data["Nominal DC Voltage (V)"],
-        data["Backup Requirement (Min)"],
-        data["Ageing (%)"],
-        data["Design Margin (%)"],
-        data["DOD Margin (%)"],
-        data["Derating Factor (%)"],
-        data["Number of Cells"],
-        data["Cell Chemistry"],
-        data["Calculated Load (kW)"],
-        data["Max Charging Voltage (V)"],
-        data["End Cell Voltage (V)"],
-        data["Energy Required (kWh)"],
-        data["Capacity Required (Ah)"],
-        data.get("Cap req w/ Ageing (Ah)", None),
-        data["Cap req w/ Design Margin (Ah)"],
-        data["Cap req w/ DOD (Ah)"],
-        data["Cap req w/ Derating (Ah)"],
-        data["Nearest Available Capacity (Ah)"],
-        data["Offered Battery Configuration"],
-        data["Total Available Energy (kWh)"],
-        data["Backup Time (Min)"],
-        data.get("Ageing Type", "BOL")
-    ))
-
-    conn.commit()
-    conn.close()
-    return sr_no
 
 def duplicate_sizing(table_name, sr_no, db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    validate_table(cur, table_name)
-    
-    new_sr_no = get_next_sr_no(cur, table_name)
-    
-    cur.execute(f"""
-        INSERT INTO "{table_name}" (
-            sr_no, customer_name, solution_provider, ups_make, ups_model, ups_rating_kva,
-            actual_load_kva, actual_load_kw, power_factor, inverter_efficiency, nominal_dc_voltage,
-            backup_requirement_min, ageing_fraction, design_margin_percent, dod_margin_percent, derating_factor_percent, number_of_cells, cell_chemistry,
-            calculated_load_kw, max_charging_voltage, end_cell_voltage, energy_required_kwh,
-            capacity_required_ah, cap_with_ageing_ah, cap_with_design_margin_ah, cap_with_dod_margin_ah, cap_with_derating_factor_ah, nearest_capacity_ah, offered_battery_config,
-            total_available_energy_kwh, backup_time_min, ageing_type
+    username = _user(db_path)
+    data_cols = ", ".join(_FIELDS[1:])
+    with get_conn() as conn:
+        cur = conn.cursor()
+        validate_table(cur, table_name, username)
+        new_sr_no = _next_sr_no(cur, username, table_name)
+        cur.execute(
+            f"""INSERT INTO sizings (username, project_name, sr_no, {data_cols})
+                SELECT username, project_name, %s, {data_cols}
+                FROM sizings WHERE username = %s AND project_name = %s AND sr_no = %s""",
+            (new_sr_no, username, table_name, sr_no),
         )
-        SELECT
-            ?, customer_name, solution_provider, ups_make, ups_model, ups_rating_kva,
-            actual_load_kva, actual_load_kw, power_factor, inverter_efficiency, nominal_dc_voltage,
-            backup_requirement_min, ageing_fraction, design_margin_percent, dod_margin_percent, derating_factor_percent, number_of_cells, cell_chemistry,
-            calculated_load_kw, max_charging_voltage, end_cell_voltage, energy_required_kwh,
-            capacity_required_ah, cap_with_ageing_ah, cap_with_design_margin_ah, cap_with_dod_margin_ah, cap_with_derating_factor_ah, nearest_capacity_ah, offered_battery_config,
-            total_available_energy_kwh, backup_time_min, ageing_type
-        FROM "{table_name}"
-        WHERE sr_no = ?
-    """, (new_sr_no, sr_no))
-    
-    conn.commit()
-    conn.close()
 
-
-
-
-# -------------------------------------------------
-# UPDATE
-# -------------------------------------------------
 
 def update_sizing(table_name, sr_no, data, db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    validate_table(cur, table_name)
+    username = _user(db_path)
+    sets = ", ".join(f"{f} = %s" for f in _FIELDS[1:])
+    with get_conn() as conn:
+        cur = conn.cursor()
+        validate_table(cur, table_name, username)
+        cur.execute(
+            f"UPDATE sizings SET {sets}"
+            " WHERE username = %s AND project_name = %s AND sr_no = %s",
+            _values(data) + [username, table_name, sr_no],
+        )
 
-    cur.execute(f"""
-        UPDATE "{table_name}" SET
-            customer_name=?,
-            solution_provider=?,
-            ups_make=?,
-            ups_model=?,
-            ups_rating_kva=?,
-            actual_load_kva=?,
-            actual_load_kw=?,
-            power_factor=?,
-            inverter_efficiency=?,
-            nominal_dc_voltage=?,
-            backup_requirement_min=?,
-            ageing_fraction=?,
-            design_margin_percent=?,
-            dod_margin_percent=?,
-            derating_factor_percent=?,
-            number_of_cells=?,
-            cell_chemistry=?,
-            calculated_load_kw=?,
-            max_charging_voltage=?,
-            end_cell_voltage=?,
-            energy_required_kwh=?,
-            capacity_required_ah=?,
-            cap_with_ageing_ah=?,
-            cap_with_design_margin_ah=?,
-            cap_with_dod_margin_ah=?,
-            cap_with_derating_factor_ah=?,
-            nearest_capacity_ah=?,
-            offered_battery_config=?,
-            total_available_energy_kwh=?,
-            backup_time_min=?,
-            ageing_type=?
-        WHERE sr_no=?
-    """, (
-        data["Customer Name"],
-        data["Solution Provider"],
-        data["UPS Make"],
-        data["UPS Model"],
-        data["UPS Rating (KVA)"],
-        data["Actual Load (KVA)"],
-        data["Actual Load (kW)"],
-        data["Power Factor"],
-        data["Inverter Efficiency"],
-        data["Nominal DC Voltage (V)"],
-        data["Backup Requirement (Min)"],
-        data["Ageing (%)"],
-        data["Design Margin (%)"],
-        data["DOD Margin (%)"],
-        data["Derating Factor (%)"],
-        data["Number of Cells"],
-        data["Cell Chemistry"],
-        data["Calculated Load (kW)"],
-        data["Max Charging Voltage (V)"],
-        data["End Cell Voltage (V)"],
-        data["Energy Required (kWh)"],
-        data["Capacity Required (Ah)"],
-        data.get("Cap req w/ Ageing (Ah)", None),
-        data["Cap req w/ Design Margin (Ah)"],
-        data["Cap req w/ DOD (Ah)"],
-        data["Cap req w/ Derating (Ah)"],
-        data["Nearest Available Capacity (Ah)"],
-        data["Offered Battery Configuration"],
-        data["Total Available Energy (kWh)"],
-        data["Backup Time (Min)"],
-        data.get("Ageing Type", "BOL"),
-        sr_no
-    ))
-
-    conn.commit()
-    conn.close()
-
-
-
-# -------------------------------------------------
-# DELETE
-# -------------------------------------------------
 
 def delete_sizing(table_name, sr_no, db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    validate_table(cur, table_name)
+    username = _user(db_path)
+    with get_conn() as conn:
+        cur = conn.cursor()
+        validate_table(cur, table_name, username)
+        cur.execute(
+            "DELETE FROM sizings WHERE username = %s AND project_name = %s AND sr_no = %s",
+            (username, table_name, sr_no),
+        )
+        _renumber(cur, username, table_name)
 
-    cur.execute(f'DELETE FROM "{table_name}" WHERE sr_no=?', (sr_no,))
-    renumber_sr_no(cur, table_name)
-
-    conn.commit()
-    conn.close()
 
 def delete_project(table_name, db_path=None):
-    conn = get_connection(db_path)
-    cur = conn.cursor()
-    validate_table(cur, table_name)
-
-    cur.execute(f"""
-        DROP TABLE IF EXISTS "{table_name}"
-    """)
-
-    conn.commit()
-    conn.close()
+    username = _user(db_path)
+    with get_conn() as conn:
+        cur = conn.cursor()
+        validate_table(cur, table_name, username)
+        cur.execute(
+            "DELETE FROM sizings WHERE username = %s AND project_name = %s",
+            (username, table_name),
+        )
+        cur.execute(
+            "DELETE FROM sizing_projects WHERE username = %s AND project_name = %s",
+            (username, table_name),
+        )

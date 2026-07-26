@@ -20,10 +20,10 @@ sys.path.insert(0, str(BACKEND_DIR))
 from tempquotebase import (
     init_temp_db, add_new_quote, get_all_quotes, delete_quote,
     add_product_quote, get_all_quote_products, clear_quotedata_table,
-    get_highest_sr_no, get_db_connection, get_items_table_name,
+    get_highest_sr_no,
 )
 from auth import get_current_user
-from user_db import get_user_costing_db, get_user_temp_db, get_user_wizard_temp_db, get_user_sizing_db, get_user_inquiry_db
+from user_db import get_user_temp_db, get_user_wizard_temp_db, get_user_sizing_db, get_user_inquiry_db
 from sql_handler import fetch_sizing_by_sr
 
 init_temp_db()
@@ -346,7 +346,6 @@ class PatchMetaReq(BaseModel):
 
 @router.patch("/quotes/{code}/meta", status_code=200)
 def patch_meta(code: str, body: PatchMetaReq, user=Depends(get_current_user), scope: str = Query("regular")):
-    import sqlite3 as _sq3
     tdb = _tdb(user["username"], scope)
     quotes = get_all_quotes(tdb)
     meta = next((q for q in quotes if q[0] == code), None)
@@ -362,41 +361,16 @@ def patch_meta(code: str, body: PatchMetaReq, user=Depends(get_current_user), sc
     dollar_rate = body.dollar_rate if body.dollar_rate is not None else (meta[6] if len(meta) > 6 else "")
     warranty_years = body.warranty_years if body.warranty_years else (meta[7] if len(meta) > 7 else "5")
 
-    conn = get_db_connection(tdb)
-    try:
-        c = conn.cursor()
-        c.execute(
-            "UPDATE active_quotes SET customer_name=?, solution_provider=?, sales_person=?, date=?, format=?, dollar_rate=?, warranty_years=? WHERE code=?",
-            (customer, provider, sales, date, fname, dollar_rate, str(warranty_years), code)
-        )
-        if new_code != code:
-            existing = c.execute("SELECT code FROM active_quotes WHERE code=?", (new_code,)).fetchone()
-            if existing:
-                raise HTTPException(400, f"Quote code '{new_code}' already exists")
-            c.execute("UPDATE active_quotes SET code=? WHERE code=?", (new_code, code))
-            old_tbl = get_items_table_name(code)
-            new_tbl = get_items_table_name(new_code)
-            try:
-                c.execute(f'ALTER TABLE "{old_tbl}" RENAME TO "{new_tbl}"')
-                c.execute(f'UPDATE "{new_tbl}" SET code=?', (new_code,))
-            except Exception:
-                pass
-        conn.commit()
-    finally:
-        conn.close()
+    from tempquotebase import rename_quote as _rename_quote, update_quote_meta as _upd_meta
+    if new_code != code and not _rename_quote(code, new_code, db_path=tdb):
+        raise HTTPException(400, f"Quote code '{new_code}' already exists")
+    _upd_meta(new_code, date, customer, provider, fname, sales, dollar_rate, warranty_years, db_path=tdb)
 
     try:
-        from inquiry_db import _conn as _inq_conn, init_inquiry_db as _inq_init
+        from inquiry_db import update_quote_meta as _inq_meta
         user_inq_db = get_user_inquiry_db(user["username"])
         for _dbp in [user_inq_db, None]:
-            _inq_init(_dbp)
-            with _inq_conn(_dbp) as c:
-                c.execute(
-                    "UPDATE inquiry SET project_customer=?, solution_provider=?, sales_person=? WHERE quote_code=?",
-                    (customer, provider, sales, code)
-                )
-                if new_code != code:
-                    c.execute("UPDATE inquiry SET quote_code=? WHERE quote_code=?", (new_code, code))
+            _inq_meta(code, customer, provider, sales, new_code=new_code, db_path=_dbp)
     except Exception:
         pass
 
@@ -411,11 +385,8 @@ def remove_quote(code: str, user=Depends(get_current_user), scope: str = Query("
     except Exception as e:
         raise HTTPException(500, str(e))
     try:
-        from inquiry_db import _conn as _inq_conn, init_inquiry_db as _inq_init
-        user_inq_db = get_user_inquiry_db(user["username"])
-        _inq_init(user_inq_db)
-        with _inq_conn(user_inq_db) as c:
-            c.execute('DELETE FROM inquiry WHERE quote_code = ?', (code,))
+        from inquiry_db import delete_by_quote as _inq_del
+        _inq_del(code, db_path=get_user_inquiry_db(user["username"]))
     except Exception:
         pass
     return {"detail": "deleted"}
@@ -472,13 +443,10 @@ def delete_item(code: str, sr_no: int, user=Depends(get_current_user)):
             item_type=d.get("item_type") or "system", ageing_type=d.get("ageing_type") or "BOL", db_path=tdb,
         )
     try:
-        from inquiry_db import sync_inquiry_for_quote as _sync_inq, _conn as _inq_conn, init_inquiry_db as _inq_init
+        from inquiry_db import sync_inquiry_for_quote as _sync_inq, delete_by_quote_sol as _inq_del_sol
         user_inq_db = get_user_inquiry_db(user["username"])
-        _inq_init(user_inq_db)
         if deleted_d and str(deleted_d.get("item_type", "system")) == "system":
-            with _inq_conn(user_inq_db) as c:
-                c.execute('DELETE FROM inquiry WHERE quote_code = ? AND sol_no = ?',
-                          (code, str(deleted_d.get("sol_no", ""))))
+            _inq_del_sol(code, str(deleted_d.get("sol_no", "")), db_path=user_inq_db)
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
         _sync_inq(code, updated, db_path=user_inq_db)
     except Exception:
@@ -490,16 +458,13 @@ def delete_item(code: str, sr_no: int, user=Depends(get_current_user)):
 
 @router.post("/quotes/{code}/add-from-costing", status_code=201)
 def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_current_user)):
-    import sqlite3
-    costing_db = get_user_costing_db(user["username"])
+    from pg import get_conn as _pg_conn
     try:
-        conn = sqlite3.connect(costing_db)
-        cur = conn.cursor()
-        cur.execute("PRAGMA table_info(tree)")
-        cols = [r[1] for r in cur.fetchall()]
-        cur.execute("SELECT * FROM tree")
-        rows = cur.fetchall()
-        conn.close()
+        with _pg_conn() as _c:
+            _cur = _c.cursor()
+            _cur.execute("SELECT data FROM costing_tree WHERE username = %s ORDER BY id",
+                         (user["username"],))
+            rows = [r[0] for r in _cur.fetchall()]
     except Exception as e:
         raise HTTPException(500, f"Costing DB error: {e}")
 
@@ -508,11 +473,7 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
 
     row = rows[body.costing_row_index]
 
-    def idx(name):
-        try: return cols.index(name)
-        except ValueError: return -1
-
-    base_price = float(row[idx("Total Cost of Pack (A)")] or 0)
+    base_price = float(row.get("Total Cost of Pack (A)") or 0)
     _B = 1.10
     multipliers = {
         "A": 1.0, "A+5": 1.05, "B": _B,
@@ -527,15 +488,15 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
         mult = multipliers.get(body.price_option, 1.0)
     quote_price = round(base_price * mult, 2)
 
-    duration_raw = str(row[idx("Duration")] or "0")
+    duration_raw = str(row.get("Duration") or "0")
     try:
         backup_time = float("".join(c for c in duration_raw if c.isdigit() or c == "."))
     except Exception:
         backup_time = 0.0
 
-    celltype = row[idx("Cylindrical/ Prismatic")] or "-"
-    centre_tapping = row[idx("Centre tap/non centre tap")] or "-"
-    batterypartcode = row[idx("Battery Partcode")] or "-"
+    celltype = row.get("Cylindrical/ Prismatic") or "-"
+    centre_tapping = row.get("Centre tap/non centre tap") or "-"
+    batterypartcode = row.get("Battery Partcode") or "-"
 
     tdb = get_user_temp_db(user["username"])
     quotes = get_all_quotes(tdb)
@@ -691,7 +652,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
     )
 
     try:
-        import time as _time, sqlite3 as _sq3, re as _re
+        import time as _time, re as _re
         from inquiry_db import push_row as _push_inq
         _yr = _time.localtime().tm_year % 100
         _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
@@ -743,16 +704,18 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
             _crow: dict = {}
             if body.partcode:
                 try:
-                    _cdb = get_user_costing_db(user["username"])
-                    _cconn = _sq3.connect(_cdb)
-                    _ccur = _cconn.cursor()
-                    _ccur.execute("PRAGMA table_info(tree)")
-                    _ccols = [r[1] for r in _ccur.fetchall()]
-                    _ccur.execute("SELECT * FROM tree WHERE partcode = ?", (body.partcode,))
-                    _crow_row = _ccur.fetchone()
-                    if _crow_row:
-                        _crow = dict(zip(_ccols, _crow_row))
-                    _cconn.close()
+                    from pg import get_conn as _pg_conn
+                    with _pg_conn() as _c:
+                        _ccur = _c.cursor()
+                        _ccur.execute(
+                            "SELECT data FROM costing_tree"
+                            " WHERE username = %s AND data->>'Battery Partcode' = %s"
+                            " ORDER BY id LIMIT 1",
+                            (user["username"], body.partcode),
+                        )
+                        _crow_row = _ccur.fetchone()
+                        if _crow_row:
+                            _crow = _crow_row[0]
                 except Exception:
                     pass
             _push_inq({
@@ -873,8 +836,7 @@ def firebase_list(_=Depends(get_current_user)):
 def save_to_firebase(code: str, user=Depends(get_current_user)):
     try:
         from basefunctions import save_quote
-        tdb = get_user_temp_db(user["username"])
-        save_quote(target_code=code, db_path=tdb)
+        save_quote(target_code=code, username=user["username"])
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "saved"}
@@ -941,28 +903,15 @@ class UpdateItemReq(BaseModel):
 
 @router.patch("/quotes/{code}/items/{sr_no}")
 def update_item(code: str, sr_no: int, body: UpdateItemReq, user=Depends(get_current_user), scope: str = Query("regular")):
-    from tempquotebase import get_items_table_name, get_db_connection
+    from tempquotebase import update_item_fields
     tdb = _tdb(user["username"], scope)
-    table = get_items_table_name(code)
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if not fields:
         return {"detail": "nothing to update"}
-    set_clause = ", ".join(f'"{k}" = ?' for k in fields)
-    values = list(fields.values()) + [sr_no]
-    conn = get_db_connection(tdb)
     try:
-        for col in ["system_text", "solution_text"]:
-            try:
-                conn.execute(f'ALTER TABLE "{table}" ADD COLUMN "{col}" text')
-            except Exception:
-                pass
-        conn.execute(f'UPDATE "{table}" SET {set_clause} WHERE sr_no = ?', values)
-        conn.commit()
+        update_item_fields(code, sr_no, fields, db_path=tdb)
     except Exception as e:
-        conn.rollback()
         raise HTTPException(500, str(e))
-    finally:
-        conn.close()
     return {"detail": "updated"}
 
 
@@ -973,23 +922,12 @@ class ReorderReq(BaseModel):
 
 @router.put("/quotes/{code}/reorder")
 def reorder_items(code: str, body: ReorderReq, user=Depends(get_current_user), scope: str = Query("regular")):
-    import sqlite3
-    from tempquotebase import get_items_table_name, get_db_connection
+    from tempquotebase import reorder_quote_items
     tdb = _tdb(user["username"], scope)
-    table = get_items_table_name(code)
-    conn = get_db_connection(tdb)
-    c = conn.cursor()
     try:
-        for i, sr in enumerate(body.sr_nos):
-            c.execute(f'UPDATE "{table}" SET sr_no = ? WHERE sr_no = ?', (-(i + 1), sr))
-        for i in range(len(body.sr_nos)):
-            c.execute(f'UPDATE "{table}" SET sr_no = ? WHERE sr_no = ?', (i + 1, -(i + 1)))
-        conn.commit()
+        reorder_quote_items(code, body.sr_nos, db_path=tdb)
     except Exception as e:
-        conn.rollback()
         raise HTTPException(500, str(e))
-    finally:
-        conn.close()
     try:
         from inquiry_db import sync_inquiry_for_quote as _sync_inq
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
@@ -1003,12 +941,11 @@ def reorder_items(code: str, body: ReorderReq, user=Depends(get_current_user), s
 
 def _is_project_quote(code: str) -> bool:
     """True if this quote_code was created by Wizard's 'Export as Project' (metadata-only,
-    no downloadable document). Fails open (returns False) if Firebase is unreachable, so a
-    Firebase hiccup never blocks a normal quote download."""
+    no downloadable document). Fails open (returns False) if the database is unreachable, so a
+    hiccup never blocks a normal quote download."""
     try:
-        from firebase_init import get_db
-        fdb = get_db()
-        return bool(fdb.reference(f"project_quotes/{code}").get())
+        import pgfire
+        return bool(pgfire.get("project_quotes", code))
     except Exception:
         return False
 

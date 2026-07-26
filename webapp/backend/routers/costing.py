@@ -1,4 +1,3 @@
-import sqlite3
 import tempfile
 import os
 from datetime import datetime
@@ -16,7 +15,6 @@ import sys as _sys
 _sys.path.insert(0, str(APP_DIR))
 _sys.path.insert(0, str(BACKEND_DIR))
 from auth import get_current_user, get_admin_user, get_expert_user
-from user_db import get_user_costing_db
 
 router = APIRouter()
 
@@ -53,22 +51,88 @@ COLUMNS = [
 ]
 
 
-def _get_conn(db_path: str):
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode = WAL;")
-    return conn
+# ── costing tree: per-user worksheet rows in Postgres (costing_tree) ─────────
+
+from pg import get_conn as _pg_conn
+import psycopg2.extras as _pgx
 
 
-def _ensure_tree(db_path: str):
-    conn = _get_conn(db_path)
-    cols_sql = ", ".join(f'"{c}" TEXT' for c in COLUMNS)
-    conn.execute(f'CREATE TABLE IF NOT EXISTS tree ({cols_sql})')
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(tree)").fetchall()}
-    for col in ["Dollar Rate", "Creation Date", "Created By"]:
-        if col not in existing:
-            conn.execute(f'ALTER TABLE tree ADD COLUMN "{col}" TEXT DEFAULT ""')
-    conn.commit()
-    conn.close()
+def _tree_tuple(data: dict) -> tuple:
+    return tuple(data.get(c, "") for c in COLUMNS)
+
+
+def _tree_all(username: str) -> list:
+    with _pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT data FROM costing_tree WHERE username = %s ORDER BY id", (username,))
+        return [_tree_tuple(r[0]) for r in cur.fetchall()]
+
+
+def _tree_row_at(username: str, row_index: int):
+    with _pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT data FROM costing_tree WHERE username = %s ORDER BY id LIMIT 1 OFFSET %s",
+            (username, row_index),
+        )
+        r = cur.fetchone()
+        return _tree_tuple(r[0]) if r else None
+
+
+def _tree_id_at(username: str, row_index: int):
+    with _pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM costing_tree WHERE username = %s ORDER BY id LIMIT 1 OFFSET %s",
+            (username, row_index),
+        )
+        r = cur.fetchone()
+        return r[0] if r else None
+
+
+def _tree_data(values: list) -> dict:
+    return {c: ("" if v is None else str(v)) for c, v in zip(COLUMNS, values)}
+
+
+def _tree_insert(username: str, values: list):
+    with _pg_conn() as conn:
+        conn.cursor().execute(
+            "INSERT INTO costing_tree (username, data) VALUES (%s, %s)",
+            (username, _pgx.Json(_tree_data(values))),
+        )
+
+
+def _tree_update_id(username: str, row_id: int, values: list):
+    with _pg_conn() as conn:
+        conn.cursor().execute(
+            "UPDATE costing_tree SET data = %s WHERE username = %s AND id = %s",
+            (_pgx.Json(_tree_data(values)), username, row_id),
+        )
+
+
+def _tree_delete_id(username: str, row_id: int):
+    with _pg_conn() as conn:
+        conn.cursor().execute(
+            "DELETE FROM costing_tree WHERE username = %s AND id = %s", (username, row_id)
+        )
+
+
+def _tree_clear(username: str):
+    with _pg_conn() as conn:
+        conn.cursor().execute("DELETE FROM costing_tree WHERE username = %s", (username,))
+
+
+def _tree_replace_all(username: str, values_list: list):
+    """Clear + insert in one transaction (snapshot loads, previews, restores)."""
+    with _pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM costing_tree WHERE username = %s", (username,))
+        if values_list:
+            _pgx.execute_values(
+                cur,
+                "INSERT INTO costing_tree (username, data) VALUES %s",
+                [(username, _pgx.Json(_tree_data(v))) for v in values_list],
+            )
 
 
 # ── Pydantic ─────────────────────────────────────────────────────────────────
@@ -333,13 +397,7 @@ def get_durations(_=Depends(get_current_user)):
 
 @router.get("/tree")
 def get_tree(user=Depends(get_current_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM tree")
-    rows = cur.fetchall()
-    conn.close()
+    rows = _tree_all(user["username"])
     return [_row_to_model(r) for r in rows]
 
 
@@ -352,17 +410,10 @@ def search_add(body: SearchRequest, user=Depends(get_current_user)):
         from basefunctions import search_data_by_keyword
         products = search_data_by_keyword(body.duration, "Battery Pack", body.keyword)
     except Exception as e:
-        raise HTTPException(500, f"Firebase error: {e}")
+        raise HTTPException(500, f"Database error: {e}")
 
     if not products:
         raise HTTPException(404, f"No products found for duration={body.duration!r} keyword={body.keyword!r}")
-
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    quoted = [f'"{c}"' for c in COLUMNS]
-    placeholders = ",".join(["?"] * len(COLUMNS))
-    query = f'INSERT INTO tree ({",".join(quoted)}) VALUES ({placeholders})'
 
     for product in products:
         if not product.get("active"):
@@ -425,26 +476,14 @@ def search_add(body: SearchRequest, user=Depends(get_current_user)):
             product.get("Creation Date", ""),
             product.get("Created By", ""),
         ]
-        conn.execute(query, values)
+        _tree_insert(user["username"], values)
 
-    conn.commit()
-    conn.close()
     return {"detail": f"Added {len(products)} row(s)"}
 
 
 @router.post("/tree/insert", status_code=201)
 def insert_row(body: CostingRow, user=Depends(get_current_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    quoted = [f'"{c}"' for c in COLUMNS]
-    placeholders = ",".join(["?"] * len(COLUMNS))
-    conn.execute(
-        f'INSERT INTO tree ({",".join(quoted)}) VALUES ({placeholders})',
-        _model_to_values(body),
-    )
-    conn.commit()
-    conn.close()
+    _tree_insert(user["username"], _model_to_values(body))
     return {"detail": "inserted"}
 
 
@@ -452,80 +491,40 @@ def insert_row(body: CostingRow, user=Depends(get_current_user)):
 def update_row(row_index: int, body: CostingRow, user=Depends(get_current_user)):
     body.created_by = user.get("username", "")
     body.creation_date = datetime.now().strftime("%d.%m.%y")
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    cur = conn.cursor()
-    cur.execute("SELECT rowid FROM tree LIMIT -1 OFFSET ?", (row_index,))
-    row = cur.fetchone()
-    if not row:
+    row_id = _tree_id_at(user["username"], row_index)
+    if row_id is None:
         raise HTTPException(404, "Row not found")
-    rowid = row[0]
-    set_clause = ", ".join(f'"{c}"=?' for c in COLUMNS)
-    cur.execute(f'UPDATE tree SET {set_clause} WHERE rowid=?', _model_to_values(body) + [rowid])
-    conn.commit()
-    conn.close()
+    _tree_update_id(user["username"], row_id, _model_to_values(body))
     return {"detail": "updated"}
 
 
 @router.delete("/tree/{row_index}")
 def delete_row(row_index: int, user=Depends(get_current_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    cur = conn.cursor()
-    cur.execute("SELECT rowid FROM tree LIMIT -1 OFFSET ?", (row_index,))
-    row = cur.fetchone()
-    if not row:
+    row_id = _tree_id_at(user["username"], row_index)
+    if row_id is None:
         raise HTTPException(404, "Row not found")
-    cur.execute("DELETE FROM tree WHERE rowid=?", (row[0],))
-    conn.commit()
-    conn.close()
+    _tree_delete_id(user["username"], row_id)
     return {"detail": "deleted"}
 
 
 @router.delete("/tree")
 def clear_tree(user=Depends(get_current_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    conn.execute("DELETE FROM tree")
-    conn.commit()
-    conn.close()
+    _tree_clear(user["username"])
     return {"detail": "cleared"}
 
 
 @router.post("/tree/{row_index}/duplicate", status_code=201)
 def duplicate_row(row_index: int, user=Depends(get_current_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM tree LIMIT -1 OFFSET ?", (row_index,))
-    row = cur.fetchone()
+    row = _tree_row_at(user["username"], row_index)
     if row is None:
-        conn.close()
         raise HTTPException(404, "Row not found")
-    quoted = [f'"{c}"' for c in COLUMNS]
-    placeholders = ",".join(["?"] * len(COLUMNS))
-    vals = [row[i] for i in range(len(COLUMNS))]
-    conn.execute(f'INSERT INTO tree ({",".join(quoted)}) VALUES ({placeholders})', vals)
-    conn.commit()
-    conn.close()
+    _tree_insert(user["username"], list(row))
     return {"detail": "duplicated"}
 
 
 @router.post("/tree/{row_index}/save-to-firebase")
 def save_to_firebase(row_index: int, user=Depends(get_expert_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM tree LIMIT -1 OFFSET ?", (row_index,))
-    row = cur.fetchone()
-    conn.close()
-    if not row is None and len(row) == 0:
-        raise HTTPException(404, "Row not found")
+    row = _tree_row_at(user["username"], row_index)
     if row is None:
         raise HTTPException(404, "Row not found")
 
@@ -601,13 +600,7 @@ def save_to_firebase(row_index: int, user=Depends(get_expert_user)):
 
 @router.post("/tree/{row_index}/deactivate-in-firebase")
 def deactivate_in_firebase(row_index: int, user=Depends(get_expert_user)):
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM tree LIMIT -1 OFFSET ?", (row_index,))
-    row = cur.fetchone()
-    conn.close()
+    row = _tree_row_at(user["username"], row_index)
     if row is None:
         raise HTTPException(404, "Row not found")
 
@@ -623,11 +616,10 @@ def deactivate_in_firebase(row_index: int, user=Depends(get_expert_user)):
         raise HTTPException(400, "Row has no duration or battery_pack — cannot match in Firebase")
 
     try:
-        from firebase_admin import db as fdb
-        ref = fdb.reference(f"products/{duration}")
-        all_products = ref.get()
+        import pgfire
+        all_products = pgfire.get("products", duration)
     except Exception as e:
-        raise HTTPException(500, f"Firebase error: {e}")
+        raise HTTPException(500, f"Database error: {e}")
 
     if not isinstance(all_products, dict):
         return {"deactivated": 0, "reason": "no products in this duration bucket"}
@@ -688,9 +680,9 @@ def deactivate_in_firebase(row_index: int, user=Depends(get_expert_user)):
 
     target_pid = candidates[0][0]
     try:
-        fdb.reference(f"products/{duration}/{target_pid}").update({"active": False})
+        pgfire.update("products", f"{duration}/{target_pid}", {"active": False})
     except Exception as e:
-        raise HTTPException(500, f"Firebase update failed: {e}")
+        raise HTTPException(500, f"Database update failed: {e}")
 
     return {"deactivated": 1, "firebase_id": str(target_pid)}
 
@@ -713,27 +705,13 @@ def load_snapshot(body: SnapshotLoad, user=Depends(get_expert_user)):
     if not columns or not rows:
         raise HTTPException(400, "Snapshot has no data")
 
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    conn.execute("DELETE FROM tree")
-
-    quoted = [f'"{c}"' for c in COLUMNS]
-    placeholders = ",".join(["?"] * len(COLUMNS))
-    insert_q = f'INSERT INTO tree ({",".join(quoted)}) VALUES ({placeholders})'
-
     col_idx = {c: i for i, c in enumerate(columns)}
 
     def _get(row, col_name):
         i = col_idx.get(col_name)
         return row[i] if i is not None and i < len(row) else ""
 
-    for row in rows:
-        values = [_get(row, c) for c in COLUMNS]
-        conn.execute(insert_q, values)
-
-    conn.commit()
-    conn.close()
+    _tree_replace_all(user["username"], [[_get(row, c) for c in COLUMNS] for row in rows])
     return {"detail": f"Loaded {len(rows)} row(s)"}
 
 
@@ -819,18 +797,12 @@ def preview_costing(body: PreviewRequest, user=Depends(get_current_user)):
         import sys
         sys.path.insert(0, str(APP_DIR))
         from basefunctions import get_all_durations
-        from firebase_admin import db as fdb
+        import pgfire
         durations = get_all_durations()
     except Exception as e:
-        raise HTTPException(503, f"Firebase error: {e}")
+        raise HTTPException(503, f"Database error: {e}")
 
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    conn.execute("DELETE FROM tree")
-    quoted = [f'"{c}"' for c in COLUMNS]
-    placeholders = ",".join(["?"] * len(COLUMNS))
-    insert_q = f'INSERT INTO tree ({",".join(quoted)}) VALUES ({placeholders})'
+    collected: list = []
 
     # filter to duration matching backup_minutes, fallback to all if none found
     target_minutes = int(body.backup_minutes) if body.backup_minutes > 0 else None
@@ -843,7 +815,7 @@ def preview_costing(body: PreviewRequest, user=Depends(get_current_user)):
     inserted = 0
     for duration in search_durations:
         try:
-            products = fdb.reference(f"products/{duration}").get()
+            products = pgfire.get("products", duration)
             if not products:
                 continue
             items = products.items() if isinstance(products, dict) else enumerate(products)
@@ -852,7 +824,7 @@ def preview_costing(body: PreviewRequest, user=Depends(get_current_user)):
                     continue
                 bp = str(product.get("Battery Pack", "")).lower()
                 if keyword in bp and product.get("active"):
-                    conn.execute(insert_q, _product_values(duration, product))
+                    collected.append(_product_values(duration, product))
                     inserted += 1
         except Exception:
             continue
@@ -861,7 +833,7 @@ def preview_costing(body: PreviewRequest, user=Depends(get_current_user)):
     if inserted == 0 and search_durations != durations:
         for duration in durations:
             try:
-                products = fdb.reference(f"products/{duration}").get()
+                products = pgfire.get("products", duration)
                 if not products:
                     continue
                 items = products.items() if isinstance(products, dict) else enumerate(products)
@@ -870,13 +842,12 @@ def preview_costing(body: PreviewRequest, user=Depends(get_current_user)):
                         continue
                     bp = str(product.get("Battery Pack", "")).lower()
                     if keyword in bp and product.get("active"):
-                        conn.execute(insert_q, _product_values(duration, product))
+                        collected.append(_product_values(duration, product))
                         inserted += 1
             except Exception:
                 continue
 
-    conn.commit()
-    conn.close()
+    _tree_replace_all(user["username"], collected)
     return {"loaded": inserted, "durations_searched": len(search_durations)}
 
 
@@ -904,18 +875,12 @@ def preview_costing_range(body: PreviewRangeRequest, user=Depends(get_current_us
         import sys
         sys.path.insert(0, str(APP_DIR))
         from basefunctions import get_all_durations
-        from firebase_admin import db as fdb
+        import pgfire
         durations = get_all_durations()
     except Exception as e:
-        raise HTTPException(503, f"Firebase error: {e}")
+        raise HTTPException(503, f"Database error: {e}")
 
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    conn.execute("DELETE FROM tree")
-    quoted = [f'"{c}"' for c in COLUMNS]
-    placeholders = ",".join(["?"] * len(COLUMNS))
-    insert_q = f'INSERT INTO tree ({",".join(quoted)}) VALUES ({placeholders})'
+    collected: list = []
 
     target_minutes = int(body.backup_minutes) if body.backup_minutes > 0 else None
     if target_minutes:
@@ -927,7 +892,7 @@ def preview_costing_range(body: PreviewRangeRequest, user=Depends(get_current_us
     inserted = 0
     for duration in search_durations:
         try:
-            products = fdb.reference(f"products/{duration}").get()
+            products = pgfire.get("products", duration)
             if not products:
                 continue
             items = products.items() if isinstance(products, dict) else enumerate(products)
@@ -936,7 +901,7 @@ def preview_costing_range(body: PreviewRangeRequest, user=Depends(get_current_us
                     continue
                 bp = str(product.get("Battery Pack", "")).lower()
                 if any(cfg.lower() in bp for cfg in configs) and product.get("active"):
-                    conn.execute(insert_q, _product_values(duration, product))
+                    collected.append(_product_values(duration, product))
                     inserted += 1
         except Exception:
             continue
@@ -945,7 +910,7 @@ def preview_costing_range(body: PreviewRangeRequest, user=Depends(get_current_us
     if inserted == 0 and search_durations != durations:
         for duration in durations:
             try:
-                products = fdb.reference(f"products/{duration}").get()
+                products = pgfire.get("products", duration)
                 if not products:
                     continue
                 items = products.items() if isinstance(products, dict) else enumerate(products)
@@ -954,13 +919,12 @@ def preview_costing_range(body: PreviewRangeRequest, user=Depends(get_current_us
                         continue
                     bp = str(product.get("Battery Pack", "")).lower()
                     if any(cfg.lower() in bp for cfg in configs) and product.get("active"):
-                        conn.execute(insert_q, _product_values(duration, product))
+                        collected.append(_product_values(duration, product))
                         inserted += 1
             except Exception:
                 continue
 
-    conn.commit()
-    conn.close()
+    _tree_replace_all(user["username"], collected)
     return {"loaded": inserted, "durations_searched": len(search_durations), "configs": configs}
 
 
@@ -995,10 +959,10 @@ def find_costing(body: FindCostingReq, _=Depends(get_current_user)):
         import sys
         sys.path.insert(0, str(APP_DIR))
         from basefunctions import get_all_durations
-        from firebase_admin import db as fdb
+        import pgfire
         durations = get_all_durations()
     except Exception as e:
-        raise HTTPException(503, f"Firebase error: {e}")
+        raise HTTPException(503, f"Database error: {e}")
 
     target_minutes = int(body.backup_minutes) if body.backup_minutes > 0 else None
     if target_minutes:
@@ -1010,7 +974,7 @@ def find_costing(body: FindCostingReq, _=Depends(get_current_user)):
     results = []
     for duration in search_durations:
         try:
-            products = fdb.reference(f"products/{duration}").get()
+            products = pgfire.get("products", duration)
             if not products:
                 continue
             items = products.items() if isinstance(products, dict) else enumerate(products)
@@ -1097,17 +1061,7 @@ def find_costing(body: FindCostingReq, _=Depends(get_current_user)):
 @router.post("/tree/bulk-restore")
 def bulk_restore(rows: List[CostingRow], user=Depends(get_current_user)):
     """Clear tree and restore a saved list of rows."""
-    db = get_user_costing_db(user["username"])
-    _ensure_tree(db)
-    conn = _get_conn(db)
-    conn.execute("DELETE FROM tree")
-    quoted = [f'"{c}"' for c in COLUMNS]
-    placeholders = ",".join(["?"] * len(COLUMNS))
-    insert_q = f'INSERT INTO tree ({",".join(quoted)}) VALUES ({placeholders})'
-    for row in rows:
-        conn.execute(insert_q, _model_to_values(row))
-    conn.commit()
-    conn.close()
+    _tree_replace_all(user["username"], [_model_to_values(row) for row in rows])
     return {"restored": len(rows)}
 
 
@@ -1127,18 +1081,17 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_admin_user)):
         import sys
         sys.path.insert(0, str(APP_DIR))
         from basefunctions import get_all_durations
-        from firebase_admin import db
+        import pgfire
         durations = get_all_durations()
     except Exception as e:
-        raise HTTPException(503, f"Firebase error: {e}")
+        raise HTTPException(503, f"Database error: {e}")
 
     updated_count = 0
     errors = []
 
     for duration in durations:
         try:
-            ref = db.reference(f"products/{duration}")
-            products = ref.get()
+            products = pgfire.get("products", duration)
             if not products:
                 continue
             items = products.items() if isinstance(products, dict) else enumerate(products)
@@ -1149,7 +1102,7 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_admin_user)):
                     continue
                 try:
                     changes = _apply_mass_update(product, body.field, multiplier)
-                    db.reference(f"products/{duration}/{pid}").update(changes)
+                    pgfire.update("products", f"{duration}/{pid}", changes)
                     updated_count += 1
                 except Exception as e:
                     errors.append(f"{duration}/{pid}: {e}")
@@ -1170,11 +1123,11 @@ def mass_update_preview(_=Depends(get_current_user)):
         import sys
         sys.path.insert(0, str(APP_DIR))
         from basefunctions import get_all_durations
-        from firebase_admin import db
+        import pgfire
         durations = get_all_durations()
         result = []
         for d in durations:
-            products = db.reference(f"products/{d}").get()
+            products = pgfire.get("products", d)
             count = len(products) if isinstance(products, dict) else (len(products) if isinstance(products, list) else 0)
             result.append({"duration": d, "count": count})
         return result

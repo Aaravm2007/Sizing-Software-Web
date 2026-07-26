@@ -3,7 +3,7 @@ import requests as http_requests
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from typing import Optional
-from firebase_init import get_db
+import pgfire
 from auth import create_access_token, get_current_user, pwd_context
 from config import settings
 from limiter import limiter
@@ -17,8 +17,7 @@ EXPERT_USERNAMES = {"a"}
 
 def _get_role(username: str) -> str:
     try:
-        db = get_db()
-        data = db.reference(f"allowed_users/{username}").get()
+        data = pgfire.get("allowed_users", username)
         if isinstance(data, dict):
             return data.get("role", "u")
     except Exception:
@@ -80,12 +79,11 @@ class TokenResponse(BaseModel):
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _firebase_user(username: str):
-    """Fetch user dict from Firebase allowed_users/{username}. Returns None if missing."""
+    """Fetch user dict from allowed_users/{username}. Returns None if missing."""
     try:
-        db = get_db()
-        return db.reference(f"allowed_users/{username}").get()
+        return pgfire.get("allowed_users", username)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Firebase error: {e}")
+        raise HTTPException(status_code=503, detail=f"Database error: {e}")
 
 
 def _exchange_google_token(id_token: str) -> dict:
@@ -156,9 +154,8 @@ def login(request: Request, body: LoginRequest):
     # Lazy migration — upgrade plaintext to bcrypt hash on successful login
     if _needs_hash_upgrade(stored_pw):
         try:
-            get_db().reference(f"allowed_users/{body.username}").update(
-                {"password": pwd_context.hash(body.password)}
-            )
+            pgfire.update("allowed_users", body.username,
+                          {"password": pwd_context.hash(body.password)})
         except Exception:
             pass  # migration failed — not fatal, will retry next login
 
@@ -185,10 +182,9 @@ def register(body: RegisterRequest):
         user_data["email"] = body.email
 
     try:
-        db = get_db()
-        db.reference(f"allowed_users/{body.username}").set(user_data)
+        pgfire.set("allowed_users", body.username, user_data)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Firebase error: {e}")
+        raise HTTPException(status_code=503, detail=f"Database error: {e}")
 
     return {"detail": f"{body.username} registered successfully"}
 
@@ -202,10 +198,9 @@ def google_login(body: GoogleLoginRequest):
 
     # Find which allowed_user has this email
     try:
-        db = get_db()
-        users = db.reference("allowed_users").get()
+        users = pgfire.get("allowed_users")
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Firebase error: {e}")
+        raise HTTPException(status_code=503, detail=f"Database error: {e}")
 
     found_username = None
     if isinstance(users, dict):
@@ -246,10 +241,9 @@ def google_register(
 
     user_data = {"password": pwd_context.hash(password), "role": "u", "email": email}
     try:
-        db = get_db()
-        db.reference(f"allowed_users/{username}").set(user_data)
+        pgfire.set("allowed_users", username, user_data)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Firebase error: {e}")
+        raise HTTPException(status_code=503, detail=f"Database error: {e}")
 
     return {"detail": f"{username} registered with Google account"}
 
@@ -271,8 +265,7 @@ class AdminUpdateUser(BaseModel):
 @router.get("/users")
 def admin_list_users(user: dict = Depends(get_current_user)):
     _require_expert(user)
-    db = get_db()
-    snap = db.reference("allowed_users").get() or {}
+    snap = pgfire.get("allowed_users") or {}
     result = [{"username": "a", "email": "", "role": "e", "hardcoded": True}]
     if isinstance(snap, dict):
         for uname, udata in snap.items():
@@ -297,13 +290,12 @@ def admin_create_user(body: AdminCreateUser, user: dict = Depends(get_current_us
     _enforce_password_policy(body.password.strip())
     if body.username == ADMIN_USER:
         raise HTTPException(409, "That username is reserved")
-    db = get_db()
-    if db.reference(f"allowed_users/{body.username}").get() is not None:
+    if pgfire.get("allowed_users", body.username) is not None:
         raise HTTPException(409, "User already exists")
     data: dict = {"password": pwd_context.hash(body.password), "role": body.role or "u"}
     if body.email:
         data["email"] = body.email
-    db.reference(f"allowed_users/{body.username}").set(data)
+    pgfire.set("allowed_users", body.username, data)
     return {"username": body.username, "role": data["role"], "email": data.get("email", "")}
 
 
@@ -312,9 +304,7 @@ def admin_update_user(target_username: str, body: AdminUpdateUser, user: dict = 
     _require_expert(user)
     if target_username in EXPERT_USERNAMES:
         raise HTTPException(400, "Cannot modify the built-in admin account")
-    db = get_db()
-    ref = db.reference(f"allowed_users/{target_username}")
-    existing = ref.get()
+    existing = pgfire.get("allowed_users", target_username)
     if not existing:
         raise HTTPException(404, "User not found")
     patch: dict = {}
@@ -326,8 +316,8 @@ def admin_update_user(target_username: str, body: AdminUpdateUser, user: dict = 
         _enforce_password_policy(body.password.strip())
         patch["password"] = pwd_context.hash(body.password.strip())
     if patch:
-        ref.update(patch)
-    updated = ref.get()
+        pgfire.update("allowed_users", target_username, patch)
+    updated = pgfire.get("allowed_users", target_username)
     return {"username": target_username, "role": updated.get("role", "u"),
             "email": updated.get("email", ""), "hardcoded": False}
 
@@ -339,9 +329,7 @@ def admin_delete_user(target_username: str, user: dict = Depends(get_current_use
         raise HTTPException(400, "Cannot delete the built-in admin account")
     if target_username == user.get("username"):
         raise HTTPException(400, "Cannot delete your own account")
-    db = get_db()
-    ref = db.reference(f"allowed_users/{target_username}")
-    if not ref.get():
+    if not pgfire.get("allowed_users", target_username):
         raise HTTPException(404, "User not found")
-    ref.delete()
+    pgfire.delete("allowed_users", target_username)
     return {"deleted": target_username}

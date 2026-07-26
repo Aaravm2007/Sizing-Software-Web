@@ -1,83 +1,6 @@
-import sqlite3
 import time
-from pathlib import Path
 
-_DB = str(Path(__file__).parent.parent / "data" / "pending_full_data.db")
-
-_CREATE = """
-    CREATE TABLE IF NOT EXISTS export_history (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        inquiry_code        TEXT NOT NULL,
-        exported_by         TEXT DEFAULT '',
-        export_type         TEXT DEFAULT '',
-        exported_at         INTEGER,
-        ups_make            TEXT DEFAULT '',
-        ups_model           TEXT DEFAULT '',
-        ups_kva             TEXT DEFAULT '',
-        actual_load_kva     TEXT DEFAULT '',
-        load_kw             TEXT DEFAULT '',
-        power_factor        TEXT DEFAULT '',
-        inverter_efficiency TEXT DEFAULT '',
-        dc_voltage          TEXT DEFAULT '',
-        backup_min          TEXT DEFAULT '',
-        cell_chemistry      TEXT DEFAULT '',
-        ageing_pct          TEXT DEFAULT '',
-        design_margin_pct   TEXT DEFAULT '',
-        dod_margin_pct      TEXT DEFAULT '',
-        derating_pct        TEXT DEFAULT '',
-        capacity_ah         TEXT DEFAULT '',
-        part_code           TEXT DEFAULT '',
-        cell_type           TEXT DEFAULT '',
-        ageing_type         TEXT DEFAULT '',
-        backup_time_min     TEXT DEFAULT '',
-        centre_tap          TEXT DEFAULT '',
-        quote_code          TEXT DEFAULT '',
-        qty_system          TEXT DEFAULT '',
-        rate_system         TEXT DEFAULT '',
-        price_system        TEXT DEFAULT '',
-        sales_person        TEXT DEFAULT '',
-        solution_provider   TEXT DEFAULT '',
-        project_customer    TEXT DEFAULT '',
-        rack_dim            TEXT DEFAULT '',
-        qty                 TEXT DEFAULT '',
-        per_rack_price      TEXT DEFAULT '',
-        price               TEXT DEFAULT '',
-        rack1_dim           TEXT DEFAULT '',
-        rack1_qty           TEXT DEFAULT '',
-        rack1_rate          TEXT DEFAULT '',
-        rack1_price         TEXT DEFAULT '',
-        rack2_dim           TEXT DEFAULT '',
-        rack2_qty           TEXT DEFAULT '',
-        rack2_rate          TEXT DEFAULT '',
-        rack2_price         TEXT DEFAULT '',
-        custom_cost_desc    TEXT DEFAULT '',
-        custom_cost_price   TEXT DEFAULT '',
-        cc1_desc            TEXT DEFAULT '',
-        cc1_price           TEXT DEFAULT '',
-        cc2_desc            TEXT DEFAULT '',
-        cc2_price           TEXT DEFAULT '',
-        cc3_desc            TEXT DEFAULT '',
-        cc3_price           TEXT DEFAULT '',
-        cc4_desc            TEXT DEFAULT '',
-        cc4_price           TEXT DEFAULT '',
-        cc5_desc            TEXT DEFAULT '',
-        cc5_price           TEXT DEFAULT '',
-        submission_date     TEXT DEFAULT '',
-        submitted_to        TEXT DEFAULT '',
-        datasheet_name      TEXT DEFAULT '',
-        gad_name            TEXT DEFAULT '',
-        remarks             TEXT DEFAULT '',
-        sol_no              TEXT DEFAULT '',
-        type                TEXT DEFAULT '',
-        dollar_rate         TEXT DEFAULT '',
-        warranty_years      TEXT DEFAULT '5',
-        quote_format        TEXT DEFAULT '',
-        base_partcode       TEXT DEFAULT '',
-        UNIQUE(inquiry_code, exported_by, exported_at)
-    )
-"""
-
-_INDEX = "CREATE INDEX IF NOT EXISTS idx_inquiry_code ON export_history(inquiry_code)"
+from pg import get_conn, dict_cur
 
 _DATA_COLS = [
     "export_type", "ups_make", "ups_model", "ups_kva", "actual_load_kva",
@@ -101,34 +24,8 @@ _DATA_COLS = [
 ]
 
 
-def _conn():
-    Path(_DB).parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(_DB)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode=WAL")
-    return c
-
-
 def init_db():
-    with _conn() as c:
-        c.execute(_CREATE)
-        c.execute(_INDEX)
-        for col in [
-            "sales_person", "solution_provider", "project_customer",
-            "rack1_dim", "rack1_qty", "rack1_rate", "rack1_price",
-            "rack2_dim", "rack2_qty", "rack2_rate", "rack2_price",
-            "cc1_desc", "cc1_price",
-            "cc2_desc", "cc2_price",
-            "cc3_desc", "cc3_price",
-            "cc4_desc", "cc4_price",
-            "cc5_desc", "cc5_price",
-            "sol_no", "type",
-            "dollar_rate", "warranty_years", "quote_format", "base_partcode",
-        ]:
-            try:
-                c.execute(f'ALTER TABLE export_history ADD COLUMN "{col}" TEXT DEFAULT \'\'')
-            except Exception:
-                pass
+    """Schema is created by pg.init_all_tables(); kept for call-site compatibility."""
 
 
 def log_export(inquiry_code: str, exported_by: str, data: dict) -> int:
@@ -138,37 +35,45 @@ def log_export(inquiry_code: str, exported_by: str, data: dict) -> int:
     allowed = [k for k in _DATA_COLS if k in data]
     ts = data.get("exported_at") or int(time.time() * 1000)
     cols = ["inquiry_code", "exported_by", "exported_at"] + allowed
-    vals = [inquiry_code, exported_by, ts] + [data[k] for k in allowed]
-    cols_sql = ", ".join(cols)
-    ph = ", ".join("?" * len(vals))
+    vals = [inquiry_code, exported_by, ts] + [
+        v if v is None or isinstance(v, str) else str(v)
+        for v in (data[k] for k in allowed)
+    ]
+    cols_sql = ", ".join(f'"{c}"' for c in cols)
+    ph = ", ".join(["%s"] * len(vals))
     update_sql = ", ".join(f'"{k}" = excluded."{k}"' for k in allowed)
-    with _conn() as c:
-        cur = c.execute(
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
             f"""INSERT INTO export_history ({cols_sql}) VALUES ({ph})
-                ON CONFLICT(inquiry_code, exported_by, exported_at)
-                DO UPDATE SET {update_sql}""" if allowed else
+                ON CONFLICT (inquiry_code, exported_by, exported_at)
+                DO UPDATE SET {update_sql}
+                RETURNING id""" if allowed else
             f"""INSERT INTO export_history ({cols_sql}) VALUES ({ph})
-                ON CONFLICT(inquiry_code, exported_by, exported_at) DO NOTHING""",
+                ON CONFLICT (inquiry_code, exported_by, exported_at) DO NOTHING
+                RETURNING id""",
             vals,
         )
-        return cur.lastrowid
+        row = cur.fetchone()
+        return row[0] if row else 0
 
 
 def delete_export(inquiry_code: str, exported_by: str, exported_at: int):
-    with _conn() as c:
-        c.execute(
-            "DELETE FROM export_history WHERE inquiry_code = ? AND exported_by = ? AND exported_at = ?",
+    with get_conn() as conn:
+        conn.cursor().execute(
+            "DELETE FROM export_history WHERE inquiry_code = %s AND exported_by = %s AND exported_at = %s",
             (inquiry_code, exported_by, exported_at),
         )
 
 
 def list_by_code(inquiry_code: str) -> list:
-    with _conn() as c:
-        rows = c.execute(
-            "SELECT * FROM export_history WHERE inquiry_code = ? ORDER BY exported_at DESC",
+    with get_conn() as conn:
+        cur = dict_cur(conn)
+        cur.execute(
+            "SELECT * FROM export_history WHERE inquiry_code = %s ORDER BY exported_at DESC",
             (inquiry_code,),
-        ).fetchall()
-    return [dict(r) for r in rows]
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 _BUCKET = {
@@ -182,12 +87,13 @@ _LABEL_ORDER = ["Quote", "Sizing", "Datasheet", "GAD"]
 
 def export_summary_global() -> dict:
     """Return {inquiry_code: [label, ...]} aggregated across all users."""
-    with _conn() as c:
-        rows = c.execute("SELECT inquiry_code, export_type FROM export_history").fetchall()
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT inquiry_code, export_type FROM export_history")
+        rows = cur.fetchall()
     seen: dict[str, set] = {}
-    for r in rows:
-        code = r["inquiry_code"]
-        label = _BUCKET.get(r["export_type"])
+    for code, export_type in rows:
+        label = _BUCKET.get(export_type)
         if code and label:
             seen.setdefault(code, set()).add(label)
     return {

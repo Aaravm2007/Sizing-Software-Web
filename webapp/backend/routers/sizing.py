@@ -140,12 +140,11 @@ def _row_to_dict(row) -> dict:
 # ── project endpoints ─────────────────────────────────────────────────────────
 
 def _all_usernames() -> list[str]:
-    """Same source as the admin panel's user list: hardcoded expert + Firebase allowed_users."""
+    """Same source as the admin panel's user list: hardcoded expert + allowed_users."""
     usernames = ["a"]
     try:
-        from firebase_init import get_db
-        db = get_db()
-        snap = db.reference("allowed_users").get() or {}
+        import pgfire
+        snap = pgfire.get("allowed_users") or {}
         if isinstance(snap, dict):
             usernames.extend(u for u in snap if u != "a")
     except Exception:
@@ -821,9 +820,8 @@ def export_project(body: ProjectExportBody, user=Depends(get_current_user)):
             pass  # quote registration is best-effort; export must still succeed
 
         try:
-            from firebase_init import get_db
-            fdb = get_db()
-            fdb.reference(f"project_quotes/{body.quote_code.strip()}").set({
+            import pgfire
+            pgfire.set("project_quotes", body.quote_code.strip(), {
                 "type": "Project",
                 "quote_code": body.quote_code.strip(),
                 "customer_name": body.customer_name,
@@ -837,7 +835,7 @@ def export_project(body: ProjectExportBody, user=Depends(get_current_user)):
                 "full_state": body.full_state,
             })
         except Exception:
-            pass  # Firebase backup is best-effort; export must still succeed
+            pass  # backup is best-effort; export must still succeed
 
     fname = f"{body.quote_code or 'project'}_multi_sizing.xlsx"
     return FileResponse(xlsx_path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -848,9 +846,8 @@ def export_project(body: ProjectExportBody, user=Depends(get_current_user)):
 def list_project_quotes(user=Depends(get_current_user)):
     """Summaries of this user's past 'Export as Project' sessions, for 'Load Past Wizard'."""
     try:
-        from firebase_init import get_db
-        fdb = get_db()
-        all_entries = fdb.reference("project_quotes").get() or {}
+        import pgfire
+        all_entries = pgfire.get("project_quotes") or {}
     except Exception:
         return []
     username = user.get("username", "")
@@ -871,11 +868,10 @@ def list_project_quotes(user=Depends(get_current_user)):
 @router.get("/project-quotes/{code}")
 def get_project_quote(code: str, user=Depends(get_current_user)):
     try:
-        from firebase_init import get_db
-        fdb = get_db()
-        entry = fdb.reference(f"project_quotes/{code}").get()
+        import pgfire
+        entry = pgfire.get("project_quotes", code)
     except Exception as e:
-        raise HTTPException(503, f"Firebase error: {e}")
+        raise HTTPException(503, f"Database error: {e}")
     if not entry or not isinstance(entry, dict):
         raise HTTPException(404, "Project quote not found")
     if entry.get("created_by") != user.get("username", ""):

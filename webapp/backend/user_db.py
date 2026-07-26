@@ -2,6 +2,10 @@ import re
 from pathlib import Path
 from fastapi import HTTPException
 
+# These paths are legacy per-user sqlite locations, now used only as scope
+# tokens: the *_db modules parse the username (and temp-vs-wizard scope) back
+# out of the path tail. No files or directories are created.
+
 _APP_DIR = Path(__file__).parent.parent.parent  # project root
 _SAFE_USERNAME = re.compile(r'^[a-zA-Z0-9_-]+$')
 
@@ -13,10 +17,7 @@ def _sanitize_username(username: str) -> str:
 
 
 def _user_dir(username: str) -> Path:
-    username = _sanitize_username(username)
-    d = _APP_DIR / "data" / username
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return _APP_DIR / "data" / _sanitize_username(username)
 
 
 def get_user_sizing_db(username: str) -> str:

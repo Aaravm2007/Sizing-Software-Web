@@ -1,11 +1,14 @@
 import calendar as _calendar
 import re
-import sqlite3
 import time
 from datetime import date as _date
 from pathlib import Path
 
-_DB_PATH = str(Path(__file__).parent.parent.parent / "data" / "inquiry.db")
+from pg import get_conn, dict_cur
+
+# db_path values are legacy per-user sqlite paths (data/{username}/inquiry.db),
+# now used only as scope tokens: None -> global sheet (username ''), a path ->
+# that user's working sheet.
 
 _COLS = [
     "sr_no", "inquiry_code", "inquiry_date", "type", "sales_person", "solution_provider",
@@ -29,6 +32,10 @@ _COLS = [
 ]
 
 
+def _user(db_path=None) -> str:
+    return "" if db_path is None else Path(db_path).parent.name
+
+
 _GLOBAL_SEARCH_COLS = [
     "inquiry_code", "solution_provider", "project_customer", "part_code",
     "sales_person", "handled_by", "submitted_to", "submitted_by", "ups_kva",
@@ -45,21 +52,21 @@ _ALL_FILTER_COLS = _SELECT_FILTER_COLS | _DATE_FILTER_COLS | _TEXT_FILTER_COLS
 
 def _date_sql(col: str, encoded: str):
     if encoded.startswith("exact:"):
-        return f'{col} = ?', [encoded[6:]]
+        return f'{col} = %s', [encoded[6:]]
     if encoded.startswith("month:"):
-        return f'{col} LIKE ?', [encoded[6:] + "%"]
+        return f'{col} LIKE %s', [encoded[6:] + "%"]
     if encoded.startswith("year:"):
-        return f'{col} LIKE ?', [encoded[5:] + "%"]
+        return f'{col} LIKE %s', [encoded[5:] + "%"]
     if encoded.startswith("from:"):
-        return f'{col} >= ?', [encoded[5:]]
+        return f'{col} >= %s', [encoded[5:]]
     if encoded.startswith("to:"):
-        return f'{col} <= ?', [encoded[3:]]
+        return f'{col} <= %s', [encoded[3:]]
     if encoded.startswith("range:"):
         parts = encoded[6:].split("|", 1)
         frm, to = parts[0], (parts[1] if len(parts) > 1 else "")
         conds, params = [], []
-        if frm: conds.append(f'{col} >= ?'); params.append(frm)
-        if to:  conds.append(f'{col} <= ?'); params.append(to)
+        if frm: conds.append(f'{col} >= %s'); params.append(frm)
+        if to:  conds.append(f'{col} <= %s'); params.append(to)
         return (" AND ".join(conds) if conds else "1=1"), params
     if encoded.startswith("nfrom:"):
         parts = encoded[6:].split("|", 1)
@@ -69,7 +76,7 @@ def _date_sql(col: str, encoded: str):
         month = d.month - 1 + n
         yr = d.year + month // 12; mo = month % 12 + 1
         end = _date(yr, mo, min(d.day, _calendar.monthrange(yr, mo)[1])).isoformat()
-        return f'{col} >= ? AND {col} <= ?', [start, end]
+        return f'{col} >= %s AND {col} <= %s', [start, end]
     if encoded.startswith("nto:"):
         parts = encoded[4:].split("|", 1)
         n, end = int(parts[0] or 0), (parts[1] if len(parts) > 1 else "")
@@ -78,15 +85,15 @@ def _date_sql(col: str, encoded: str):
         month = d.month - 1 - n
         yr = d.year + month // 12; mo = month % 12 + 1
         start = _date(yr, mo, min(d.day, _calendar.monthrange(yr, mo)[1])).isoformat()
-        return f'{col} >= ? AND {col} <= ?', [start, end]
-    return f'{col} LIKE ?', [f'%{encoded}%']
+        return f'{col} >= %s AND {col} <= %s', [start, end]
+    return f'{col} ILIKE %s', [f'%{encoded}%']
 
 
-def _build_where(search: str, fields: dict):
-    conds, params = [], []
+def _build_where(search: str, fields: dict, username: str):
+    conds, params = ['i.username = %s'], [username]
     if search.strip():
         q = f"%{search.strip()}%"
-        or_conds = " OR ".join(f'i."{c}" LIKE ?' for c in _GLOBAL_SEARCH_COLS)
+        or_conds = " OR ".join(f'i."{c}" ILIKE %s' for c in _GLOBAL_SEARCH_COLS)
         conds.append(f"({or_conds})")
         params.extend([q] * len(_GLOBAL_SEARCH_COLS))
     for key, val in fields.items():
@@ -97,18 +104,17 @@ def _build_where(search: str, fields: dict):
             frag, ps = _date_sql(col, val)
             conds.append(frag); params.extend(ps)
         elif key in _SELECT_FILTER_COLS:
-            conds.append(f'{col} = ?'); params.append(val)
+            conds.append(f'{col} = %s'); params.append(val)
         else:
-            conds.append(f'{col} LIKE ?'); params.append(f'%{val}%')
-    where = ("WHERE " + " AND ".join(conds)) if conds else ""
-    return where, params
+            conds.append(f'{col} ILIKE %s'); params.append(f'%{val}%')
+    return "WHERE " + " AND ".join(conds), params
 
 
 _BASE_SQL = """
     WITH grp AS (
         SELECT inquiry_code, MAX(sr_no) AS newest_sr
         FROM inquiry
-        WHERE inquiry_code IS NOT NULL AND inquiry_code != ''
+        WHERE username = %s AND inquiry_code IS NOT NULL AND inquiry_code != ''
         GROUP BY inquiry_code
     )
     SELECT i.* FROM inquiry i
@@ -118,31 +124,34 @@ _BASE_SQL = """
        AND i.inquiry_code != ''
     {where}
     ORDER BY COALESCE(grp.newest_sr, i.sr_no) DESC,
-             CAST(i.sol_no AS INTEGER) ASC,
+             CAST(NULLIF(regexp_replace(i.sol_no, '[^0-9]', '', 'g'), '') AS INTEGER) ASC NULLS FIRST,
              i.sr_no ASC
 """
 
 
 def list_inquiry_page(page: int, limit: int, search: str, fields: dict, db_path=None) -> list:
-    init_inquiry_db(db_path)
-    where, params = _build_where(search, fields)
+    username = _user(db_path)
+    where, params = _build_where(search, fields, username)
     offset = (page - 1) * limit
-    sql = _BASE_SQL.format(where=where) + " LIMIT ? OFFSET ?"
-    with _conn(db_path) as c:
-        rows = [dict(r) for r in c.execute(sql, params + [limit, offset]).fetchall()]
+    sql = _BASE_SQL.format(where=where) + " LIMIT %s OFFSET %s"
+    with get_conn() as conn:
+        cur = dict_cur(conn)
+        cur.execute(sql, [username] + params + [limit, offset])
+        rows = [dict(r) for r in cur.fetchall()]
     for r in rows:
+        r.pop("id", None); r.pop("username", None)
         r["_id"] = str(r["sr_no"])
     return rows
 
 
 def count_inquiry(search: str, fields: dict, db_path=None) -> int:
-    init_inquiry_db(db_path)
-    where, params = _build_where(search, fields)
+    username = _user(db_path)
+    where, params = _build_where(search, fields, username)
     sql = f"""
         WITH grp AS (
             SELECT inquiry_code, MAX(sr_no) AS newest_sr
             FROM inquiry
-            WHERE inquiry_code IS NOT NULL AND inquiry_code != ''
+            WHERE username = %s AND inquiry_code IS NOT NULL AND inquiry_code != ''
             GROUP BY inquiry_code
         )
         SELECT COUNT(*) FROM inquiry i
@@ -152,63 +161,41 @@ def count_inquiry(search: str, fields: dict, db_path=None) -> int:
            AND i.inquiry_code != ''
         {where}
     """
-    with _conn(db_path) as c:
-        return c.execute(sql, params).fetchone()[0]
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, [username] + params)
+        return cur.fetchone()[0]
 
 
 def export_inquiry_rows(search: str, fields: dict, db_path=None) -> list:
     """All rows matching filters — no pagination, used for Excel export."""
-    init_inquiry_db(db_path)
-    where, params = _build_where(search, fields)
+    username = _user(db_path)
+    where, params = _build_where(search, fields, username)
     sql = _BASE_SQL.format(where=where)
-    with _conn(db_path) as c:
-        return [dict(r) for r in c.execute(sql, params).fetchall()]
-
-
-def _conn(db_path=None):
-    c = sqlite3.connect(db_path or _DB_PATH)
-    c.row_factory = sqlite3.Row
-    return c
+    with get_conn() as conn:
+        cur = dict_cur(conn)
+        cur.execute(sql, [username] + params)
+        rows = [dict(r) for r in cur.fetchall()]
+    for r in rows:
+        r.pop("id", None); r.pop("username", None)
+    return rows
 
 
 def init_inquiry_db(db_path=None):
-    col_defs = ", ".join(
-        f'"{c}" {"INTEGER" if c in ("sr_no", "created_at") else "TEXT"}'
-        for c in _COLS
-    )
-    with _conn(db_path) as c:
-        c.execute(f'CREATE TABLE IF NOT EXISTS inquiry ({col_defs})')
-        c.execute('CREATE TABLE IF NOT EXISTS inquiry_meta (next_id INTEGER DEFAULT 1)')
-        if not c.execute('SELECT 1 FROM inquiry_meta').fetchone():
-            c.execute('INSERT INTO inquiry_meta VALUES (1)')
-        for col in [
-            "quote_code", "sol_no", "ageing_type", "backup_time_min", "inquiry_code", "handled_by",
-            "rack1_dim", "rack1_qty", "rack1_rate", "rack1_price",
-            "rack2_dim", "rack2_qty", "rack2_rate", "rack2_price",
-            "cc1_desc", "cc1_price",
-            "cc2_desc", "cc2_price",
-            "cc3_desc", "cc3_price",
-            "cc4_desc", "cc4_price",
-            "cc5_desc", "cc5_price",
-            "submitted_by", "dollar_rate", "base_partcode", "quote_format",
-        ]:
-            try:
-                c.execute(f'ALTER TABLE inquiry ADD COLUMN "{col}" TEXT')
-            except Exception:
-                pass
-        try:
-            c.execute("UPDATE inquiry SET warranty = '5' WHERE warranty = '5 year'")
-        except Exception:
-            pass
+    """Schema is created by pg.init_all_tables(); kept for call-site compatibility."""
 
 
 def suggest_next_inquiry_code(db_path=None) -> dict:
-    init_inquiry_db(db_path)
-    with _conn(db_path) as c:
-        row = c.execute(
-            "SELECT inquiry_code FROM inquiry WHERE inquiry_code IS NOT NULL AND inquiry_code != '' ORDER BY sr_no DESC LIMIT 1"
-        ).fetchone()
-    last = dict(row)["inquiry_code"] if row else ""
+    with get_conn() as conn:
+        cur = dict_cur(conn)
+        cur.execute(
+            "SELECT inquiry_code FROM inquiry"
+            " WHERE username = %s AND inquiry_code IS NOT NULL AND inquiry_code != ''"
+            " ORDER BY sr_no DESC LIMIT 1",
+            (_user(db_path),),
+        )
+        row = cur.fetchone()
+    last = row["inquiry_code"] if row else ""
     if not last:
         return {"last": "", "suggestion": ""}
     m = re.match(r"^(.*?)(\d+)$", last)
@@ -220,52 +207,93 @@ def suggest_next_inquiry_code(db_path=None) -> dict:
     return {"last": last, "suggestion": suggestion}
 
 
-def _next_sr(db_path=None) -> int:
-    with _conn(db_path) as c:
-        row = c.execute('SELECT MAX(sr_no) FROM inquiry').fetchone()
-        return (row[0] or 0) + 1
+def _next_sr(cur, username: str) -> int:
+    cur.execute("SELECT COALESCE(MAX(sr_no), 0) + 1 FROM inquiry WHERE username = %s", (username,))
+    return cur.fetchone()[0]
 
 
 def push_row(data: dict, db_path=None) -> str:
-    init_inquiry_db(db_path)
-    sr = _next_sr(db_path)
-    data = {**data, "sr_no": sr, "created_at": int(time.time() * 1000)}
-    cols = [k for k in data if k in _COLS]
-    ph = ", ".join("?" * len(cols))
-    qs = ", ".join(f'"{c}"' for c in cols)
-    with _conn(db_path) as c:
-        c.execute(f'INSERT INTO inquiry ({qs}) VALUES ({ph})', [data[k] for k in cols])
+    username = _user(db_path)
+    with get_conn() as conn:
+        cur = conn.cursor()
+        sr = _next_sr(cur, username)
+        data = {**data, "sr_no": sr, "created_at": int(time.time() * 1000)}
+        cols = [k for k in data if k in _COLS]
+        ph = ", ".join(["%s"] * (len(cols) + 1))
+        qs = ", ".join(['"username"'] + [f'"{c}"' for c in cols])
+        cur.execute(f'INSERT INTO inquiry ({qs}) VALUES ({ph})',
+                    [username] + [data[k] for k in cols])
     return str(sr)
 
 
 def list_rows(db_path=None) -> list:
-    init_inquiry_db(db_path)
-    with _conn(db_path) as c:
-        rows = [dict(r) for r in c.execute('SELECT * FROM inquiry ORDER BY sr_no').fetchall()]
+    with get_conn() as conn:
+        cur = dict_cur(conn)
+        cur.execute("SELECT * FROM inquiry WHERE username = %s ORDER BY sr_no", (_user(db_path),))
+        rows = [dict(r) for r in cur.fetchall()]
     for r in rows:
+        r.pop("id", None); r.pop("username", None)
         r["_id"] = str(r["sr_no"])
     return rows
 
 
 def update_row(sr_no: int, data: dict, db_path=None):
-    init_inquiry_db(db_path)
     fields = [k for k in data if k in _COLS and k != "sr_no"]
     if not fields:
         return
-    sets = ", ".join(f'"{f}" = ?' for f in fields)
-    with _conn(db_path) as c:
-        c.execute(f'UPDATE inquiry SET {sets} WHERE sr_no = ?', [data[f] for f in fields] + [sr_no])
+    sets = ", ".join(f'"{f}" = %s' for f in fields)
+    with get_conn() as conn:
+        conn.cursor().execute(
+            f'UPDATE inquiry SET {sets} WHERE username = %s AND sr_no = %s',
+            [data[f] for f in fields] + [_user(db_path), sr_no],
+        )
 
 
 def delete_row(sr_no: int, db_path=None):
-    init_inquiry_db(db_path)
-    with _conn(db_path) as c:
-        c.execute('DELETE FROM inquiry WHERE sr_no = ?', (sr_no,))
+    with get_conn() as conn:
+        conn.cursor().execute(
+            'DELETE FROM inquiry WHERE username = %s AND sr_no = %s', (_user(db_path), sr_no)
+        )
+
+
+# ── quote-linked helpers (used by routers/quotation.py) ───────────────────────
+
+def update_quote_meta(quote_code: str, customer: str, provider: str, sales: str,
+                      new_code: str = None, db_path=None):
+    username = _user(db_path)
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE inquiry SET project_customer=%s, solution_provider=%s, sales_person=%s"
+            " WHERE username=%s AND quote_code=%s",
+            (customer, provider, sales, username, quote_code),
+        )
+        if new_code and new_code != quote_code:
+            cur.execute(
+                "UPDATE inquiry SET quote_code=%s WHERE username=%s AND quote_code=%s",
+                (new_code, username, quote_code),
+            )
+
+
+def delete_by_quote(quote_code: str, db_path=None):
+    with get_conn() as conn:
+        conn.cursor().execute(
+            "DELETE FROM inquiry WHERE username=%s AND quote_code=%s",
+            (_user(db_path), quote_code),
+        )
+
+
+def delete_by_quote_sol(quote_code: str, sol_no: str, db_path=None):
+    with get_conn() as conn:
+        conn.cursor().execute(
+            "DELETE FROM inquiry WHERE username=%s AND quote_code=%s AND sol_no=%s",
+            (_user(db_path), quote_code, sol_no),
+        )
 
 
 def sync_inquiry_for_quote(quote_code: str, items: list, db_path=None):
     """Re-derive rack/custom fields for each system row in inquiry."""
-    init_inquiry_db(db_path)
+    username = _user(db_path)
     system_items = [i for i in items if str(i.get("item_type", "system")) == "system"]
     rack_items   = [i for i in items if str(i.get("item_type", "")) == "rack"]
     custom_items = [i for i in items if str(i.get("item_type", "")) == "custom"]
@@ -307,22 +335,17 @@ def sync_inquiry_for_quote(quote_code: str, items: list, db_path=None):
             fields[f"cc{i}_desc"]  = ""
             fields[f"cc{i}_price"] = ""
 
-        with _conn(db_path) as conn:
-            row = conn.execute(
-                'SELECT sr_no FROM inquiry WHERE quote_code = ? AND sol_no = ?',
-                (quote_code, sol_no)
-            ).fetchone()
-            if row:
-                sets = ", ".join(f'"{f}" = ?' for f in fields)
-                conn.execute(
-                    f'UPDATE inquiry SET {sets} WHERE quote_code = ? AND sol_no = ?',
-                    [fields[f] for f in fields] + [quote_code, sol_no]
-                )
+        with get_conn() as conn:
+            cur = conn.cursor()
+            sets = ", ".join(f'"{f}" = %s' for f in fields)
+            cur.execute(
+                f'UPDATE inquiry SET {sets} WHERE username = %s AND quote_code = %s AND sol_no = %s',
+                [fields[f] for f in fields] + [username, quote_code, sol_no]
+            )
 
 
 def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
     """Create/update global inquiry rows from completed pending export history."""
-    init_inquiry_db()
 
     _QUOTE_FIELDS = [
         "ups_kva", "part_code", "cell_type", "ageing_type", "backup_time_min",
@@ -352,7 +375,7 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
         for e in quote_exports:
             e["sol_no"] = "1"
         sol_nos = ["1"]
-    sol_nos.sort(key=lambda s: int(s) if s.isdigit() else s)
+    sol_nos.sort(key=lambda s: int(s) if s.isdigit() else 0)
 
     _pending_base = {
         "inquiry_code":    inquiry_code,
@@ -363,16 +386,18 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
         "handled_by":      str(pending_row.get("assigned_to", "") or ""),
     }
 
-    def _insert(gc, row_data: dict):
+    def _insert(cur, row_data: dict):
         ins = {k: v for k, v in row_data.items() if k in _COLS and k != "sr_no"}
         ins["created_at"] = int(time.time() * 1000)
-        ins["sr_no"] = (gc.execute('SELECT MAX(sr_no) FROM inquiry').fetchone()[0] or 0) + 1
+        ins["sr_no"] = _next_sr(cur, "")
         valid = [k for k in ins if k in _COLS]
-        cols_sql = ", ".join('"' + c + '"' for c in valid)
-        ph = ", ".join("?" * len(valid))
-        gc.execute(f'INSERT INTO inquiry ({cols_sql}) VALUES ({ph})', [ins[k] for k in valid])
+        cols_sql = ", ".join(['"username"'] + ['"' + c + '"' for c in valid])
+        ph = ", ".join(["%s"] * (len(valid) + 1))
+        cur.execute(f'INSERT INTO inquiry ({cols_sql}) VALUES ({ph})',
+                    [""] + [ins[k] for k in valid])
 
-    with _conn() as gc:
+    with get_conn() as conn:
+        cur = conn.cursor()
         # ── one system row per sol_no from quote exports ──
         for sol_no in sol_nos:
             sol_quotes = sorted(
@@ -414,19 +439,20 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
                 "datasheet": ds_flag, "gad": gad_flag, "sizing_sheet": sz_flag,
             }
 
-            existing = gc.execute(
-                'SELECT sr_no FROM inquiry WHERE quote_code = ? AND sol_no = ?',
+            cur.execute(
+                "SELECT sr_no FROM inquiry WHERE username = '' AND quote_code = %s AND sol_no = %s",
                 (row_data.get("quote_code", ""), sol_no)
-            ).fetchone()
+            )
+            existing = cur.fetchone()
             if existing:
                 fields = [k for k in row_data if k in _COLS and k not in ("sr_no", "created_at")]
-                sets = ", ".join(f'"{f}" = ?' for f in fields)
-                gc.execute(
-                    f'UPDATE inquiry SET {sets} WHERE quote_code = ? AND sol_no = ?',
+                sets = ", ".join(f'"{f}" = %s' for f in fields)
+                cur.execute(
+                    f"UPDATE inquiry SET {sets} WHERE username = '' AND quote_code = %s AND sol_no = %s",
                     [row_data[f] for f in fields] + [row_data.get("quote_code", ""), sol_no]
                 )
             else:
-                _insert(gc, row_data)
+                _insert(cur, row_data)
 
         def _is_standalone(e):
             s = e.get("sol_no", "")
@@ -438,7 +464,7 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
                 continue
             fname = str(e.get("datasheet_name", "") or "").strip()
             if fname:
-                _insert(gc, {**_pending_base, "type": "Datasheet", "part_code": fname})
+                _insert(cur, {**_pending_base, "type": "Datasheet", "part_code": fname})
 
         # ── unlinked / standalone GADs → own row ──
         for e in gad_exports:
@@ -446,7 +472,7 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
                 continue
             fname = str(e.get("gad_name", "") or "").strip()
             if fname:
-                _insert(gc, {**_pending_base, "type": "GAD", "part_code": fname})
+                _insert(cur, {**_pending_base, "type": "GAD", "part_code": fname})
 
         # ── unlinked / standalone sizing → one row per unique fingerprint ──
         def _sz_fp(e):
@@ -460,7 +486,7 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
             if fp in seen:
                 continue
             seen.add(fp)
-            _insert(gc, {
+            _insert(cur, {
                 **_pending_base,
                 "type": "Sizing",
                 **{f: str(e.get(f, "") or "") for f in _SIZING_FIELDS},
@@ -470,39 +496,39 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
 
 
 def push_to_global(quote_code: str, user_db_path: str):
-    """Upsert all inquiry rows for quote_code from user DB into global DB."""
-    init_inquiry_db(user_db_path)
-    init_inquiry_db()
-
-    with _conn(user_db_path) as uc:
-        col_info = uc.execute('PRAGMA table_info(inquiry)').fetchall()
-        db_cols = [r[1] for r in col_info]
-        rows = uc.execute('SELECT * FROM inquiry WHERE quote_code = ?', (quote_code,)).fetchall()
+    """Upsert all inquiry rows for quote_code from the user's sheet into the global sheet."""
+    username = _user(user_db_path)
+    with get_conn() as conn:
+        cur = dict_cur(conn)
+        cur.execute(
+            "SELECT * FROM inquiry WHERE username = %s AND quote_code = %s",
+            (username, quote_code),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
         if not rows:
             return
-        rows = [dict(zip(db_cols, r)) for r in rows]
 
-    with _conn() as gc:
         for data in rows:
             sol_no = data.get('sol_no')
-            existing = gc.execute(
-                'SELECT sr_no FROM inquiry WHERE quote_code = ? AND sol_no = ?',
+            cur.execute(
+                "SELECT sr_no FROM inquiry WHERE username = '' AND quote_code = %s AND sol_no = %s",
                 (quote_code, sol_no)
-            ).fetchone()
+            )
+            existing = cur.fetchone()
             if existing:
-                fields = {k: data[k] for k in data if k in _COLS and k not in ('sr_no', 'created_at')}
-                sets = ', '.join(f'"{f}" = ?' for f in fields)
-                gc.execute(
-                    f'UPDATE inquiry SET {sets} WHERE quote_code = ? AND sol_no = ?',
+                fields = {k: data[k] for k in data
+                          if k in _COLS and k not in ('sr_no', 'created_at')}
+                sets = ', '.join(f'"{f}" = %s' for f in fields)
+                cur.execute(
+                    f"UPDATE inquiry SET {sets} WHERE username = '' AND quote_code = %s AND sol_no = %s",
                     list(fields.values()) + [quote_code, sol_no]
                 )
             else:
                 insert_data = {k: data[k] for k in data if k in _COLS and k != 'sr_no'}
                 insert_data['created_at'] = int(time.time() * 1000)
-                max_sr = gc.execute('SELECT MAX(sr_no) FROM inquiry').fetchone()[0]
-                insert_data['sr_no'] = (max_sr or 0) + 1
-                valid = [k for k in insert_data if k in _COLS]
-                ph = ', '.join('?' * len(valid))
-                qs = ', '.join(f'"{c}"' for c in valid)
-                gc.execute(f'INSERT INTO inquiry ({qs}) VALUES ({ph})', [insert_data[k] for k in valid])
-
+                insert_data['sr_no'] = _next_sr(cur, "")
+                valid = list(insert_data)
+                ph = ', '.join(['%s'] * (len(valid) + 1))
+                qs = ', '.join(['"username"'] + [f'"{c}"' for c in valid])
+                cur.execute(f'INSERT INTO inquiry ({qs}) VALUES ({ph})',
+                            [""] + [insert_data[k] for k in valid])

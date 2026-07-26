@@ -42,9 +42,8 @@ def get_expert_user(user: dict = Depends(get_current_user)) -> dict:
     if user.get("username") in admin_usernames:
         return user
     try:
-        from firebase_init import get_db
-        db = get_db()
-        data = db.reference(f"allowed_users/{user.get('username', '')}").get()
+        import pgfire
+        data = pgfire.get("allowed_users", user.get("username", ""))
         role = data.get("role", "u") if isinstance(data, dict) else "u"
     except Exception:
         role = "u"
