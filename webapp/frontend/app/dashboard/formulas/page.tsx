@@ -638,21 +638,20 @@ const RATE_LABELS: Record<string, string> = {
   subscription: "Subscription Charges (per year)",
 };
 
-function QuoteRatesTable({ include, unit }: { include: (key: string) => boolean; unit: "currency" | "percent" }) {
+function QuoteRatesTable({ endpoint, queryKey, unit }: { endpoint: string; queryKey: string; unit: "currency" | "percent" }) {
   const qc = useQueryClient();
   const [editKey, setEditKey] = useState<string | null>(null);
   const [editVal, setEditVal] = useState("");
 
-  const { data: allRates = [], isLoading } = useQuery<{ key: string; value: number; description: string }[]>({
-    queryKey: ["quote-rates"],
-    queryFn: () => api.get("/api/formulas/quote-rates").then((r) => r.data),
+  const { data: rates = [], isLoading } = useQuery<{ key: string; value: number; description: string }[]>({
+    queryKey: [queryKey],
+    queryFn: () => api.get(endpoint).then((r) => r.data),
   });
-  const rates = allRates.filter((r) => include(r.key));
 
   const save = useMutation({
     mutationFn: ({ key, value }: { key: string; value: number }) =>
-      api.put("/api/formulas/quote-rates", { key, value }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["quote-rates"] }); setEditKey(null); toast.success("Saved"); },
+      api.put(endpoint, { key, value }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: [queryKey] }); setEditKey(null); toast.success("Saved"); },
     onError: (e: any) => toast.error(apiErr(e, "Save failed")),
   });
 
@@ -916,7 +915,7 @@ export default function FormulasPage() {
               <CardTitle className="text-base">Custom Cost Preset Rates</CardTitle>
             </CardHeader>
             <CardContent>
-              <QuoteRatesTable include={(k) => !k.endsWith("_pct")} unit="currency" />
+              <QuoteRatesTable endpoint="/api/formulas/quote-rates" queryKey="quote-rates" unit="currency" />
             </CardContent>
           </Card>
           <Card>
@@ -936,7 +935,7 @@ export default function FormulasPage() {
             <CardTitle className="text-base">Costing Presets</CardTitle>
           </CardHeader>
           <CardContent>
-            <QuoteRatesTable include={(k) => k.endsWith("_pct")} unit="percent" />
+            <QuoteRatesTable endpoint="/api/formulas/costing-presets" queryKey="costing-presets" unit="percent" />
           </CardContent>
         </Card>
       )}

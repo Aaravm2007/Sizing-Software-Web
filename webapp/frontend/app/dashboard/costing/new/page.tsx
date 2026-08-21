@@ -246,12 +246,12 @@ function NewCostingInner() {
     queryFn: () => api.get("/api/costing/durations").then((r) => r.data),
   });
 
-  const { data: quoteRates = [] } = useQuery<{ key: string; value: number }[]>({
-    queryKey: ["quote-rates"],
-    queryFn: () => api.get("/api/formulas/quote-rates").then((r) => r.data),
+  const { data: costingPresets = [] } = useQuery<{ key: string; value: number }[]>({
+    queryKey: ["costing-presets"],
+    queryFn: () => api.get("/api/formulas/costing-presets").then((r) => r.data),
   });
-  const cellPct = quoteRates.find((r) => r.key === "cell_clearing_customs_pct")?.value ?? 7.5;
-  const bmsPct = quoteRates.find((r) => r.key === "bms_clearing_customs_pct")?.value ?? 18;
+  const cellPct = costingPresets.find((r) => r.key === "cell_clearing_customs_pct")?.value ?? 7.5;
+  const bmsPct = costingPresets.find((r) => r.key === "bms_clearing_customs_pct")?.value ?? 18;
 
   const { data: existingRows = [] } = useQuery<any[]>({
     queryKey: ["costing-tree"],

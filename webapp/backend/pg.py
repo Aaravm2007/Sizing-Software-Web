@@ -464,6 +464,12 @@ CREATE TABLE IF NOT EXISTS quote_rates (
     description TEXT
 );
 
+CREATE TABLE IF NOT EXISTS costing_presets (
+    key         TEXT PRIMARY KEY,
+    value       REAL NOT NULL,
+    description TEXT
+);
+
 CREATE TABLE IF NOT EXISTS modular_rack_rates (
     key   TEXT PRIMARY KEY,
     price REAL NOT NULL
@@ -560,8 +566,9 @@ INSERT INTO quote_rates VALUES ('fire_suppression', 6100.0, 'Fire Suppression Sy
 INSERT INTO quote_rates VALUES ('rmd_hvl', 6400.0, 'Remote Monitoring Device HVL (per module)') ON CONFLICT DO NOTHING;
 INSERT INTO quote_rates VALUES ('rmd_efl', 4850.0, 'Remote Monitoring Device EFL (per module)') ON CONFLICT DO NOTHING;
 INSERT INTO quote_rates VALUES ('subscription', 1500.0, 'Subscription Charges (per year)') ON CONFLICT DO NOTHING;
-INSERT INTO quote_rates VALUES ('cell_clearing_customs_pct', 7.5, 'Cell Clearing & Customs %') ON CONFLICT DO NOTHING;
-INSERT INTO quote_rates VALUES ('bms_clearing_customs_pct', 18.0, 'BMS/PCM Clearing & Customs %') ON CONFLICT DO NOTHING;
+
+INSERT INTO costing_presets VALUES ('cell_clearing_customs_pct', 7.5, 'Cell Clearing & Customs %') ON CONFLICT DO NOTHING;
+INSERT INTO costing_presets VALUES ('bms_clearing_customs_pct', 18.0, 'BMS/PCM Clearing & Customs %') ON CONFLICT DO NOTHING;
 
 INSERT INTO modular_rack_rates VALUES ('W=600*D=1000*H=880',  30000.0) ON CONFLICT DO NOTHING;
 INSERT INTO modular_rack_rates VALUES ('W=600*D=1000*H=1392', 40000.0) ON CONFLICT DO NOTHING;
@@ -584,6 +591,7 @@ ALTER TABLE inquiry         ADD COLUMN IF NOT EXISTS cell_certificate TEXT;
 ALTER TABLE pending_items   ADD COLUMN IF NOT EXISTS battery_compliance_name TEXT DEFAULT '';
 ALTER TABLE export_history  ADD COLUMN IF NOT EXISTS battery_compliance_name TEXT DEFAULT '';
 ALTER TABLE quote_items     ADD COLUMN IF NOT EXISTS original_price REAL;
+DELETE FROM quote_rates WHERE key IN ('cell_clearing_customs_pct', 'bms_clearing_customs_pct');
 """
 
 

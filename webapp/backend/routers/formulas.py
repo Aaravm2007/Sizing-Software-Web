@@ -248,6 +248,22 @@ def update_quote_rate(body: QuoteRateUpdate, _=Depends(get_expert_user)):
             raise HTTPException(404, "Rate key not found")
     return {"detail": "saved"}
 
+@router.get("/costing-presets")
+def get_costing_presets():
+    with _pg_conn() as con:
+        cur = _dict_cur(con)
+        cur.execute("SELECT key, value, description FROM costing_presets ORDER BY key")
+        return [{"key": r["key"], "value": r["value"], "description": r["description"]} for r in cur.fetchall()]
+
+@router.put("/costing-presets")
+def update_costing_preset(body: QuoteRateUpdate, _=Depends(get_expert_user)):
+    with _pg_conn() as con:
+        cur = con.cursor()
+        cur.execute("UPDATE costing_presets SET value=%s WHERE key=%s", (body.value, body.key))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Preset key not found")
+    return {"detail": "saved"}
+
 @router.get("/modular-rack-rates")
 def get_modular_rack_rates():
     with _pg_conn() as con:

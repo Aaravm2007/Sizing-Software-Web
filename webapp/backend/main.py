@@ -2,6 +2,7 @@ import logging
 import sys
 import os
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -30,8 +31,22 @@ logging.basicConfig(
 _log = logging.getLogger("app")
 _START_TIME = time.time()
 
+# ── auto-migrate on startup ─────────────────────────────────────────────────────
+# Idempotent (CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS / ON CONFLICT
+# DO NOTHING), so running it on every restart is safe and keeps schema changes
+# from ever needing a separate manual step again.
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    from pg import init_all_tables
+    try:
+        init_all_tables()
+        _log.info("Schema migrations applied")
+    except Exception as exc:
+        _log.error(f"Startup migration failed: {type(exc).__name__}: {exc}")
+    yield
+
 # ── app ───────────────────────────────────────────────────────────────────────
-app = FastAPI(title="Sizing Software API", version="1.0.0")
+app = FastAPI(title="Sizing Software API", version="1.0.0", lifespan=_lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
