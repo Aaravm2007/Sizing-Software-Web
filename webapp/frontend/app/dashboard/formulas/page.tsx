@@ -638,15 +638,16 @@ const RATE_LABELS: Record<string, string> = {
   subscription: "Subscription Charges (per year)",
 };
 
-function QuoteRatesTable() {
+function QuoteRatesTable({ include, unit }: { include: (key: string) => boolean; unit: "currency" | "percent" }) {
   const qc = useQueryClient();
   const [editKey, setEditKey] = useState<string | null>(null);
   const [editVal, setEditVal] = useState("");
 
-  const { data: rates = [], isLoading } = useQuery<{ key: string; value: number; description: string }[]>({
+  const { data: allRates = [], isLoading } = useQuery<{ key: string; value: number; description: string }[]>({
     queryKey: ["quote-rates"],
     queryFn: () => api.get("/api/formulas/quote-rates").then((r) => r.data),
   });
+  const rates = allRates.filter((r) => include(r.key));
 
   const save = useMutation({
     mutationFn: ({ key, value }: { key: string; value: number }) =>
@@ -678,7 +679,7 @@ function QuoteRatesTable() {
                   autoFocus />
               ) : (
                 <span className="font-mono">
-                  {r.key.endsWith("_pct") ? `${r.value}%` : `₹${r.value.toLocaleString()}`}
+                  {unit === "percent" ? `${r.value}%` : `₹${r.value.toLocaleString()}`}
                 </span>
               )}
             </TableCell>
@@ -822,7 +823,7 @@ function ModularRackRatesTable() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type Tab = "cell-voltages" | "dc-cells" | "backup-times" | "datasheets-gad" | "quote-rates";
+type Tab = "cell-voltages" | "dc-cells" | "backup-times" | "datasheets-gad" | "quote-rates" | "costing-presets";
 
 export default function FormulasPage() {
   const [tab, setTab] = useState<Tab>("cell-voltages");
@@ -838,7 +839,7 @@ export default function FormulasPage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b pb-0">
-        {(["cell-voltages", "dc-cells", "backup-times", "datasheets-gad", "quote-rates"] as Tab[]).map((t) => (
+        {(["cell-voltages", "dc-cells", "backup-times", "datasheets-gad", "quote-rates", "costing-presets"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -857,7 +858,9 @@ export default function FormulasPage() {
               ? "Backup Time Presets"
               : t === "datasheets-gad"
               ? "Datasheets & GAD"
-              : "Quote Rates"}
+              : t === "quote-rates"
+              ? "Quote Rates"
+              : "Costing Presets"}
           </button>
         ))}
       </div>
@@ -913,7 +916,7 @@ export default function FormulasPage() {
               <CardTitle className="text-base">Custom Cost Preset Rates</CardTitle>
             </CardHeader>
             <CardContent>
-              <QuoteRatesTable />
+              <QuoteRatesTable include={(k) => !k.endsWith("_pct")} unit="currency" />
             </CardContent>
           </Card>
           <Card>
@@ -925,6 +928,17 @@ export default function FormulasPage() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {tab === "costing-presets" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Costing Presets</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <QuoteRatesTable include={(k) => k.endsWith("_pct")} unit="percent" />
+          </CardContent>
+        </Card>
       )}
     </div>
   );
