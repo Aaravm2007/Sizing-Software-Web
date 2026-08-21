@@ -17,11 +17,15 @@ router = APIRouter()
 FOLDERS = {
     "datasheets": APP_DIR / "Datasheets",
     "gads": APP_DIR / "Gads",
+    "cell_certificates": APP_DIR / "Cell Certificates",
+    "battery_compliance": APP_DIR / "Battery Compliance",
 }
 
 ARCHIVE_FOLDERS = {
     "datasheets": APP_DIR / "archived_datasheet",
     "gads": APP_DIR / "archived_gad",
+    "cell_certificates": APP_DIR / "archived_cell_certificates",
+    "battery_compliance": APP_DIR / "archived_battery_compliance",
 }
 
 

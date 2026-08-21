@@ -9,7 +9,7 @@ from auth import get_current_user, get_expert_user
 from pending_db import push_row, list_rows, list_mine, update_row, delete_row, init_db, suggest_next_inquiry_code
 from pending_user_db import init_item_table, log_export, log_export_bulk, list_exports, list_all_tables, export_summary_all, update_export_sol_no, update_export_parent, clear_export_link, delete_export
 from pending_full_db import init_db as init_full_db, log_export as full_log_export, list_by_code as full_list_by_code, export_summary_global, delete_export as full_delete_export
-from user_db import get_user_pending_db, get_user_inquiry_db, get_user_temp_db
+from user_db import get_user_pending_db, get_user_temp_db
 
 init_db()
 init_full_db()
@@ -53,6 +53,10 @@ class StatusBody(BaseModel):
 
 class PriorityBody(BaseModel):
     priority: str
+
+
+class RemarksBody(BaseModel):
+    remarks: str
 
 
 @router.get("/next-inquiry-code")
@@ -110,6 +114,18 @@ def set_status(row_id: int, body: StatusBody, user=Depends(get_current_user)):
     if not _is_expert(user) and row.get("assigned_to") != user["username"]:
         raise HTTPException(403, "Not authorized to change this row's status")
     update_row(row_id, {"status": body.status})
+    return {"detail": "updated"}
+
+
+@router.patch("/{row_id}/remarks")
+def set_remarks(row_id: int, body: RemarksBody, user=Depends(get_current_user)):
+    rows = list_rows()
+    row = next((r for r in rows if r["id"] == row_id), None)
+    if not row:
+        raise HTTPException(404, "Not found")
+    if not _is_expert(user) and row.get("assigned_to") != user["username"]:
+        raise HTTPException(403, "Not authorized to edit this row's remarks")
+    update_row(row_id, {"remarks": body.remarks})
     return {"detail": "updated"}
 
 
@@ -229,6 +245,8 @@ class ExportEntry(BaseModel):
     submitted_to: str = ""
     datasheet_name: str = ""
     gad_name: str = ""
+    cell_certificate_name: str = ""
+    battery_compliance_name: str = ""
     remarks: str = ""
     sol_no: str = ""
     type: str = ""
@@ -360,10 +378,9 @@ def export_from_quote(body: ExportFromQuoteBody, user=Depends(get_current_user))
     log one export history record per system into the user's pending DB.
     Runs sync_inquiry_for_quote first to guarantee pending_temp is current.
     """
-    from inquiry_db import sync_inquiry_for_quote, list_rows as inq_list_rows, init_inquiry_db
+    from inquiry_db import sync_inquiry_for_quote, list_rows as inq_list_rows
     from tempquotebase import get_all_quote_products, init_temp_db
 
-    user_inq_db = get_user_inquiry_db(user["username"])
     tdb = get_user_temp_db(user["username"])
     init_temp_db(tdb)
 
@@ -378,12 +395,11 @@ def export_from_quote(body: ExportFromQuoteBody, user=Depends(get_current_user))
     try:
         raw_items = get_all_quote_products(body.quote_code, tdb)
         items = [dict(zip(_ROW_KEYS, r)) for r in raw_items]
-        sync_inquiry_for_quote(body.quote_code, items, user_inq_db)
+        sync_inquiry_for_quote(body.quote_code, items)
     except Exception:
         pass
 
-    init_inquiry_db(user_inq_db)
-    inq_rows = [r for r in inq_list_rows(user_inq_db) if r.get("quote_code") == body.quote_code]
+    inq_rows = [r for r in inq_list_rows() if r.get("quote_code") == body.quote_code]
 
     # fallback: inquiry.db has no rows for this quote → build directly from temp.db items
     if not inq_rows and items:

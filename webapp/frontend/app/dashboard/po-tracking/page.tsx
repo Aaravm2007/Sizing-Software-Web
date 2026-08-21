@@ -128,7 +128,7 @@ const ALL_EDIT_FIELDS: { key: keyof typeof EMPTY_EDIT; label: string; type?: str
   { key: "solution",             label: "Solution" },
   { key: "inquiry_qty",          label: "Inquiry Qty", readonly: true },
   { key: "po_qty",               label: "PO Qty" },
-  { key: "unit_price",           label: "Unit Price (GST Extra)", readonly: true, currency: true },
+  { key: "unit_price",           label: "Unit Price (GST Extra)" },
   { key: "cell_used",            label: "Cell Used" },
   { key: "cells_per_rack",       label: "Cells per Pack" },
   { key: "completion_date",          label: "Completion Date",         type: "date" },
@@ -663,9 +663,20 @@ export default function POTrackingPage() {
                       ))}
                     </div>
                   )}
-                  <div className="h-8 flex items-center px-3 rounded-md border bg-muted text-xs text-muted-foreground select-all">
-                    {poForm.unit_price ? `₹${parseFloat(poForm.unit_price).toLocaleString("en-IN")}` : "—"}
-                  </div>
+                  <Input
+                    type="number"
+                    value={poForm.unit_price}
+                    placeholder="e.g. 5000"
+                    onChange={e => {
+                      const val = e.target.value;
+                      setPoForm(prev => {
+                        const qty = parseFloat(prev.po_qty || "0");
+                        const unit = parseFloat(val || "0");
+                        return { ...prev, unit_price: val, total_price: qty && unit ? String(qty * unit) : prev.total_price };
+                      });
+                    }}
+                    className="h-8 text-xs"
+                  />
                 </>) : f.special === "rounded_off" ? (<>
                   <Input
                     type="number"

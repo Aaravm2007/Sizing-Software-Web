@@ -101,7 +101,7 @@ const EMPTY: FormState = {
 function n(v: string) { return parseFloat(v) || 0; }
 function fmt(v: number) { return isNaN(v) || !isFinite(v) ? "" : String(Math.round(v * 100) / 100); }
 
-function recalc(f: FormState, locked: Set<string> = new Set()): Partial<FormState> {
+function recalc(f: FormState, locked: Set<string> = new Set(), cellPct = 7.5, bmsPct = 18): Partial<FormState> {
   const updates: Partial<FormState> = {};
 
   // kw = (V * Ah) / 1000
@@ -124,7 +124,9 @@ function recalc(f: FormState, locked: Set<string> = new Set()): Partial<FormStat
     updates.total_landed_1 = "0";
     updates.cost_inr_1 = fmt(totalFob);
   } else {
-    const landed1 = totalFob + n(f.clearing_customs_1);
+    const cc1 = locked.has("clearing_customs_1") ? n(f.clearing_customs_1) : totalFob * (cellPct / 100);
+    if (!locked.has("clearing_customs_1")) updates.clearing_customs_1 = fmt(cc1);
+    const landed1 = totalFob + cc1;
     updates.total_landed_1 = fmt(landed1);
     updates.cost_inr_1 = fmt(landed1 * dr);
   }
@@ -135,7 +137,9 @@ function recalc(f: FormState, locked: Set<string> = new Set()): Partial<FormStat
     updates.total_landed_2 = "0";
     updates.cost_inr_2 = fmt(n(f.bms_pcm_cost));
   } else {
-    const landed2 = n(f.bms_pcm_cost) + n(f.clearing_customs_2);
+    const cc2 = locked.has("clearing_customs_2") ? n(f.clearing_customs_2) : n(f.bms_pcm_cost) * (bmsPct / 100);
+    if (!locked.has("clearing_customs_2")) updates.clearing_customs_2 = fmt(cc2);
+    const landed2 = n(f.bms_pcm_cost) + cc2;
     updates.total_landed_2 = fmt(landed2);
     updates.cost_inr_2 = fmt(landed2 * dr);
   }
@@ -242,6 +246,13 @@ function NewCostingInner() {
     queryFn: () => api.get("/api/costing/durations").then((r) => r.data),
   });
 
+  const { data: quoteRates = [] } = useQuery<{ key: string; value: number }[]>({
+    queryKey: ["quote-rates"],
+    queryFn: () => api.get("/api/formulas/quote-rates").then((r) => r.data),
+  });
+  const cellPct = quoteRates.find((r) => r.key === "cell_clearing_customs_pct")?.value ?? 7.5;
+  const bmsPct = quoteRates.find((r) => r.key === "bms_clearing_customs_pct")?.value ?? 18;
+
   const { data: existingRows = [] } = useQuery<any[]>({
     queryKey: ["costing-tree"],
     queryFn: () => api.get("/api/costing/tree").then((r) => r.data),
@@ -330,17 +341,17 @@ function NewCostingInner() {
   const update = (k: keyof FormState, v: string) => {
     setForm((f) => {
       const next = { ...f, [k]: v };
-      return { ...next, ...recalc(next, locked) };
+      return { ...next, ...recalc(next, locked, cellPct, bmsPct) };
     });
   };
 
-  const updateManual = (k: "landing_cost" | "labour" | "warranty" | "total_cost", v: string) => {
+  const updateManual = (k: "landing_cost" | "labour" | "warranty" | "total_cost" | "clearing_customs_1" | "clearing_customs_2", v: string) => {
     const newLocked = new Set(locked);
     if (v === "") newLocked.delete(k); else newLocked.add(k);
     setLocked(newLocked);
     setForm((f) => {
       const next = { ...f, [k]: v };
-      return { ...next, ...recalc(next, newLocked) };
+      return { ...next, ...recalc(next, newLocked, cellPct, bmsPct) };
     });
   };
 
@@ -352,13 +363,13 @@ function NewCostingInner() {
         next.voltage = parts[0];
         next.ampere_capacity = parts[1];
       }
-      return { ...next, ...recalc(next, locked) };
+      return { ...next, ...recalc(next, locked, cellPct, bmsPct) };
     });
   };
 
   const saveMut = useMutation({
     mutationFn: () => {
-      const calc = recalc(form, locked);
+      const calc = recalc(form, locked, cellPct, bmsPct);
       const merged = { ...form, ...calc };
       const payload = {
         dollar_rate: merged.dollar_rate,
@@ -511,7 +522,7 @@ function NewCostingInner() {
             <Row label="Total FOB Cost"><ReadonlyMoney value={form.total_fob} /></Row>
             {form.currency_mode_1 === "USD" && (
               <>
-                <Row label="Clearing & Customs (1)"><Num value={form.clearing_customs_1} onChange={(v) => update("clearing_customs_1", v)} /></Row>
+                <Row label="Clearing & Customs (1)"><Input type="number" value={form.clearing_customs_1} onChange={(e) => updateManual("clearing_customs_1", e.target.value)} className={locked.has("clearing_customs_1") ? "border-amber-400" : ""} placeholder="auto" /></Row>
                 <Row label="Total Landed Cost (1)"><ReadonlyMoney value={form.total_landed_1} /></Row>
               </>
             )}
@@ -534,7 +545,7 @@ function NewCostingInner() {
             <Row label="BMS/PCM Cost"><Num value={form.bms_pcm_cost} onChange={(v) => update("bms_pcm_cost", v)} /></Row>
             {form.currency_mode_2 === "USD" && (
               <>
-                <Row label="Clearing & Customs (2)"><Num value={form.clearing_customs_2} onChange={(v) => update("clearing_customs_2", v)} /></Row>
+                <Row label="Clearing & Customs (2)"><Input type="number" value={form.clearing_customs_2} onChange={(e) => updateManual("clearing_customs_2", e.target.value)} className={locked.has("clearing_customs_2") ? "border-amber-400" : ""} placeholder="auto" /></Row>
                 <Row label="Total Landed Cost (2)"><ReadonlyMoney value={form.total_landed_2} /></Row>
               </>
             )}

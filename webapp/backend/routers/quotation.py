@@ -108,7 +108,7 @@ def _row_to_dict(row: tuple) -> dict:
             "sr_no","sol_no","ups_rating","backup_requirement","calc_load",
             "celltype","centre_tapping","batterypartcode","backup_time",
             "quantity","quote_price","modular_rack","system_text","solution_text",
-            "calc_load_unit","item_type","ageing_type"]
+            "calc_load_unit","item_type","ageing_type","original_price"]
     d = dict(zip(keys, row))
     d.setdefault("system_text", None)
     d.setdefault("solution_text", None)
@@ -387,7 +387,7 @@ def remove_quote(code: str, user=Depends(get_current_user), scope: str = Query("
         raise HTTPException(500, str(e))
     try:
         from inquiry_db import delete_by_quote as _inq_del
-        _inq_del(code, db_path=get_user_inquiry_db(user["username"]))
+        _inq_del(code)
     except Exception:
         pass
     return {"detail": "deleted"}
@@ -445,11 +445,10 @@ def delete_item(code: str, sr_no: int, user=Depends(get_current_user)):
         )
     try:
         from inquiry_db import sync_inquiry_for_quote as _sync_inq, delete_by_quote_sol as _inq_del_sol
-        user_inq_db = get_user_inquiry_db(user["username"])
         if deleted_d and str(deleted_d.get("item_type", "system")) == "system":
-            _inq_del_sol(code, str(deleted_d.get("sol_no", "")), db_path=user_inq_db)
+            _inq_del_sol(code, str(deleted_d.get("sol_no", "")))
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
-        _sync_inq(code, updated, db_path=user_inq_db)
+        _sync_inq(code, updated)
     except Exception:
         pass
     return {"detail": "deleted"}
@@ -502,10 +501,9 @@ def delete_system(code: str, sr_no: int, user=Depends(get_current_user)):
         )
     try:
         from inquiry_db import sync_inquiry_for_quote as _sync_inq, delete_by_quote_sol as _inq_del_sol
-        user_inq_db = get_user_inquiry_db(user["username"])
-        _inq_del_sol(code, str(target.get("sol_no", "")), db_path=user_inq_db)
+        _inq_del_sol(code, str(target.get("sol_no", "")))
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
-        _sync_inq(code, updated, db_path=user_inq_db)
+        _sync_inq(code, updated)
     except Exception:
         pass
     return {"detail": "deleted", "removed": len(rows) - len(survivors)}
@@ -581,7 +579,6 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
             _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
             sdb = get_user_sizing_db(user["username"])
             srow = fetch_sizing_by_sr(body.sizing_project, body.sizing_sr_no, db_path=sdb)
-            user_inq_db = get_user_inquiry_db(user["username"])
             if srow:
                 unit_price = round(quote_price / body.quantity, 2) if body.quantity else quote_price
                 _push_inq({
@@ -605,11 +602,11 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
                     "price_system": str(quote_price),
                     "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
                     "custom_cost_desc": "", "custom_cost_price": "",
-                    "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO",
+                    "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO", "cell_certificate": "NO",
                     "battery_compliance": "NO", "warranty": "5",
                     "remarks": "", "submission_date": "", "submitted_to": "",
                     "quote_code": code, "sol_no": str(sol_no),
-                }, db_path=user_inq_db)
+                })
         except Exception:
             pass
 
@@ -714,7 +711,6 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
         _yr = _time.localtime().tm_year % 100
         _type = f"EVTPL/{_yr:02d}-{(_yr+1):02d}/{code}"
         unit_price = round(quote_price / body.quantity, 2) if body.quantity else quote_price
-        user_inq_db = get_user_inquiry_db(user["username"])
 
         if body.sizing_project and body.sizing_sr_no:
             sdb = get_user_sizing_db(user["username"])
@@ -743,7 +739,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                     "price_system": str(quote_price),
                     "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
                     "custom_cost_desc": "", "custom_cost_price": "",
-                    "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO",
+                    "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO", "cell_certificate": "NO",
                     "battery_compliance": "NO",
                     "warranty": str(q_warranty_years),
                     "dollar_rate": q_dollar_rate,
@@ -751,7 +747,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                     "quote_format": q_fmt or "",
                     "remarks": "", "submission_date": "", "submitted_to": "",
                     "quote_code": code, "sol_no": str(sol_no),
-                }, db_path=user_inq_db)
+                })
         else:
             # wizard flow — use body data + optional costing row lookup by partcode
             _dc_volt = ""
@@ -797,7 +793,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                 "price_system": str(quote_price),
                 "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
                 "custom_cost_desc": "", "custom_cost_price": "",
-                "datasheet": "NO", "sizing_sheet": "NO", "gad": "NO",
+                "datasheet": "NO", "sizing_sheet": "NO", "gad": "NO", "cell_certificate": "NO",
                 "battery_compliance": "NO",
                 "warranty": str(q_warranty_years),
                 "dollar_rate": q_dollar_rate,
@@ -805,7 +801,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                 "quote_format": q_fmt or "",
                 "remarks": "", "submission_date": "", "submitted_to": "",
                 "quote_code": code, "sol_no": str(sol_no),
-            }, db_path=user_inq_db)
+            })
     except Exception:
         pass
 
@@ -838,9 +834,8 @@ def add_modular(code: str, body: AddModularReq, user=Depends(get_current_user)):
     )
     try:
         from inquiry_db import sync_inquiry_for_quote as _sync_inq
-        user_inq_db = get_user_inquiry_db(user["username"])
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
-        _sync_inq(code, updated, db_path=user_inq_db)
+        _sync_inq(code, updated)
     except Exception:
         pass
     return {"detail": "added", "sr_no": sr_no, "quote_price": price}
@@ -870,9 +865,8 @@ def add_custom_cost(code: str, body: AddCustomCostReq, user=Depends(get_current_
     )
     try:
         from inquiry_db import sync_inquiry_for_quote as _sync_inq
-        user_inq_db = get_user_inquiry_db(user["username"])
         updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
-        _sync_inq(code, updated, db_path=user_inq_db)
+        _sync_inq(code, updated)
     except Exception:
         pass
     return {"detail": "added", "sr_no": sr_no, "quote_price": body.price}
@@ -955,6 +949,7 @@ class UpdateItemReq(BaseModel):
     backup_time: Optional[str] = None
     quantity: Optional[int] = None
     quote_price: Optional[float] = None
+    original_price: Optional[float] = None
     system_text: Optional[str] = None
     solution_text: Optional[str] = None
 
@@ -970,6 +965,17 @@ def update_item(code: str, sr_no: int, body: UpdateItemReq, user=Depends(get_cur
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "updated"}
+
+
+@router.post("/quotes/{code}/items/{sr_no}/revert-discount")
+def revert_item_discount(code: str, sr_no: int, user=Depends(get_current_user), scope: str = Query("regular")):
+    from tempquotebase import revert_discount
+    tdb = _tdb(user["username"], scope)
+    try:
+        revert_discount(code, sr_no, db_path=tdb)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    return {"detail": "reverted"}
 
 
 # ── Reorder ───────────────────────────────────────────────────────────────────

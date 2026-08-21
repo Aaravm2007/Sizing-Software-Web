@@ -82,22 +82,24 @@ const EXPORT_CHIP: Record<string, string> = {
   Sizing:    "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200",
   Datasheet: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200",
   GAD:       "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200",
+  "Cell Certificate": "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-200",
+  "Battery Compliance": "bg-lime-100 text-lime-800 dark:bg-lime-900/40 dark:text-lime-200",
 };
 
 type PendingFilterType = "text" | "select" | "date" | "time";
 const COLS: { key: keyof PendingRow | "completed"; label: string; w: number; filterType?: PendingFilterType; filterOptions?: { value: string; label: string }[]; sortable?: boolean }[] = [
+  { key: "assigned_to",     label: "Assigned To",             w: 120, filterType: "select" },
   { key: "inquiry_code",    label: "Inquiry Code",            w: 80,  filterType: "text",   sortable: true },
+  { key: "oem_dealer",      label: "OEM / Dealer",            w: 150, filterType: "text" },
+  { key: "end_customer",    label: "End Customer / Project",  w: 200, filterType: "text" },
+  { key: "quantity",        label: "Qty",                     w: 60  },
   { key: "received_date",   label: "Received Date",           w: 115, filterType: "date" },
   { key: "status",          label: "Status",                  w: 70,  filterType: "select", filterOptions: [{ value: "pending", label: "Pending" }, { value: "completed", label: "Completed" }], sortable: true },
   { key: "priority",        label: "Priority",                w: 70,  filterType: "select", filterOptions: [{ value: "urgent", label: "Urgent" }, { value: "semi_urgent", label: "Semi-Urgent" }, { value: "relaxed", label: "Relaxed" }], sortable: true },
   { key: "received_time",   label: "Received Time",           w: 105, filterType: "time" },
   { key: "completed",       label: "Completed",               w: 220, sortable: true },
-  { key: "oem_dealer",      label: "OEM / Dealer",            w: 150, filterType: "text" },
-  { key: "end_customer",    label: "End Customer / Project",  w: 200, filterType: "text" },
   { key: "kva_rating",      label: "KVA Rating",              w: 90  },
-  { key: "quantity",        label: "Qty",                     w: 60  },
   { key: "backup_time",     label: "Backup Time",             w: 105 },
-  { key: "assigned_to",     label: "Assigned To",             w: 120, filterType: "select" },
   { key: "reply_to",        label: "Reply To Mail",           w: 170 },
   { key: "submission_date", label: "Submission Date",         w: 120, filterType: "date" },
   { key: "submitted_to",    label: "Submitted To",            w: 160, filterType: "text" },
@@ -123,8 +125,8 @@ function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
 
 // ── MailForPicker ─────────────────────────────────────────────────────────────
 
-const MAIL_FOR_OPTIONS = ["Datasheet", "GAD", "Quote", "Sizing"];
-const MAIL_FOR_ORDER = ["Quote", "Sizing", "Datasheet", "GAD"];
+const MAIL_FOR_OPTIONS = ["Datasheet", "GAD", "Cell Certificate", "Battery Compliance", "Quote", "Sizing"];
+const MAIL_FOR_ORDER = ["Quote", "Sizing", "Datasheet", "GAD", "Cell Certificate", "Battery Compliance"];
 const byChipOrder = (a: string, b: string) => MAIL_FOR_ORDER.indexOf(a) - MAIL_FOR_ORDER.indexOf(b);
 
 function MailForPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -250,9 +252,11 @@ export default function PendingPage() {
   const me = getUsername();
 
   const [tab, setTab] = useState<"global" | "mine" | "completed">("global");
-  const [hideCompleted, setHideCompleted] = useState(false);
+  const [hideCompleted, setHideCompleted] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [editRow, setEditRow] = useState<PendingRow | null>(null);
+  const [editingRemarksId, setEditingRemarksId] = useState<number | null>(null);
+  const [remarksVal, setRemarksVal] = useState("");
   const [form, setForm] = useState({ ...EMPTY });
   const [assignRow, setAssignRow] = useState<PendingRow | null>(null);
   const [assignUser, setAssignUser] = useState("");
@@ -338,6 +342,12 @@ export default function PendingPage() {
       } else if (type === "gad") {
         const res = await api.get(`/api/datafiles/gads/files/${encodeURIComponent(e.gad_name)}`, { responseType: "blob" });
         _triggerDownload(res.data, e.gad_name);
+      } else if (type === "cell_certificate") {
+        const res = await api.get(`/api/datafiles/cell_certificates/files/${encodeURIComponent(e.cell_certificate_name)}`, { responseType: "blob" });
+        _triggerDownload(res.data, e.cell_certificate_name);
+      } else if (type === "battery_compliance") {
+        const res = await api.get(`/api/datafiles/battery_compliance/files/${encodeURIComponent(e.battery_compliance_name)}`, { responseType: "blob" });
+        _triggerDownload(res.data, e.battery_compliance_name);
       } else if (type === "quote_word" || type === "quote_pdf") {
         const fmt = type === "quote_word" ? "word" : "pdf";
         const ext = fmt === "word" ? "docx" : "pdf";
@@ -528,6 +538,13 @@ export default function PendingPage() {
     onError: (e: any) => toast.error(apiErr(e, "Priority update failed")),
   });
 
+  const remarksMut = useMutation({
+    mutationFn: ({ id, remarks }: { id: number; remarks: string }) =>
+      api.patch(`/api/pending/${id}/remarks`, { remarks }),
+    onSuccess: () => { invalidate(); },
+    onError: (e) => toast.error(apiErr(e, "Remarks update failed")),
+  });
+
   const cyclePriority = (row: PendingRow) => {
     const cycle: Record<string, string> = { relaxed: "semi_urgent", semi_urgent: "urgent", urgent: "relaxed" };
     priorityMut.mutate({ id: row.id, priority: cycle[row.priority] ?? "relaxed" });
@@ -605,7 +622,7 @@ export default function PendingPage() {
       }
 
       const unlinked = exports.filter(e =>
-        (e.export_type === "datasheet" || e.export_type === "gad") && !e.sol_no
+        (e.export_type === "datasheet" || e.export_type === "gad" || e.export_type === "cell_certificate" || e.export_type === "battery_compliance") && !e.sol_no
       );
 
       if (sizingGroups.length > 0 || unlinked.length > 0) {
@@ -937,6 +954,46 @@ export default function PendingPage() {
                           </td>
                         );
                       }
+                      if (c.key === "remarks") {
+                        const canEditRemarks = isExpert || row.assigned_to === me;
+                        const isEditingRemarks = editingRemarksId === row.id;
+                        const commitRemarks = () => {
+                          setEditingRemarksId(null);
+                          if (remarksVal !== row.remarks) remarksMut.mutate({ id: row.id, remarks: remarksVal });
+                        };
+                        return (
+                          <td
+                            key={c.key}
+                            className={cn("px-0 py-0", canEditRemarks && "cursor-text")}
+                            onClick={(ev) => {
+                              if (!canEditRemarks || isEditingRemarks) return;
+                              ev.stopPropagation();
+                              setEditingRemarksId(row.id);
+                              setRemarksVal(row.remarks);
+                            }}
+                            onDoubleClick={(ev) => ev.stopPropagation()}
+                          >
+                            {isEditingRemarks ? (
+                              <input
+                                autoFocus
+                                className="w-full h-full min-w-[200px] px-2 py-1.5 text-xs bg-blue-50 dark:bg-blue-950/30 outline-none border-2 border-blue-400"
+                                value={remarksVal}
+                                onChange={(e) => setRemarksVal(e.target.value)}
+                                onClick={(ev) => ev.stopPropagation()}
+                                onBlur={commitRemarks}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") { e.preventDefault(); commitRemarks(); }
+                                  if (e.key === "Escape") setEditingRemarksId(null);
+                                }}
+                              />
+                            ) : (
+                              <div className="px-2 py-1.5 whitespace-nowrap max-w-[240px] truncate">
+                                {row.remarks}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      }
                       const PENDING_DATE_COLS = new Set(["received_date", "submission_date", "completion_date"]);
                       const raw = (row as any)[c.key] ?? "";
                       return (
@@ -1262,8 +1319,8 @@ export default function PendingPage() {
           ) : detailExports.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-6">No exports recorded for this item yet.</p>
           ) : (() => {
-            const TYPE_LABEL: Record<string, string> = { quote_word: "Quote (Word)", quote_pdf: "Quote (PDF)", sizing_excel: "Sizing (Excel)", sizing_pdf: "Sizing (PDF)", datasheet: "Datasheet", gad: "GAD" };
-            const CHIP_KEY: Record<string, string> = { quote_word: "Quote", quote_pdf: "Quote", sizing_excel: "Sizing", sizing_pdf: "Sizing", datasheet: "Datasheet", gad: "GAD" };
+            const TYPE_LABEL: Record<string, string> = { quote_word: "Quote (Word)", quote_pdf: "Quote (PDF)", sizing_excel: "Sizing (Excel)", sizing_pdf: "Sizing (PDF)", datasheet: "Datasheet", gad: "GAD", cell_certificate: "Cell Certificate", battery_compliance: "Battery Compliance" };
+            const CHIP_KEY: Record<string, string> = { quote_word: "Quote", quote_pdf: "Quote", sizing_excel: "Sizing", sizing_pdf: "Sizing", datasheet: "Datasheet", gad: "GAD", cell_certificate: "Cell Certificate", battery_compliance: "Battery Compliance" };
             const DATA_COLS: { key: string; label: string }[] = [
               { key: "quote_code",          label: "Quote Code"     },
               { key: "exported_by",         label: "By"             },
@@ -1313,6 +1370,8 @@ export default function PendingPage() {
               { key: "cc5_price",           label: "CC5 Price"      },
               { key: "datasheet_name",      label: "Datasheet"      },
               { key: "gad_name",            label: "GAD"            },
+              { key: "cell_certificate_name", label: "Cell Certificate" },
+              { key: "battery_compliance_name", label: "Battery Compliance" },
               { key: "remarks",             label: "Remarks"        },
             ];
             // hide exported_by for per-user source; show all other cols always
@@ -1321,7 +1380,7 @@ export default function PendingPage() {
               return true;
             });
             // ── build tree ──
-            const TYPE_ORDER: Record<string, number> = { quote_word: 0, quote_pdf: 0, sizing_excel: 1, sizing_pdf: 1, datasheet: 2, gad: 3 };
+            const TYPE_ORDER: Record<string, number> = { quote_word: 0, quote_pdf: 0, sizing_excel: 1, sizing_pdf: 1, datasheet: 2, gad: 3, cell_certificate: 4, battery_compliance: 5 };
             const byTypeOrder = (a: any, b: any) => (TYPE_ORDER[a.export_type] ?? 9) - (TYPE_ORDER[b.export_type] ?? 9);
             const solSort = (a: any, b: any) => {
               const aCode = String(a.quote_code || ""), bCode = String(b.quote_code || "");
@@ -1605,7 +1664,7 @@ export default function PendingPage() {
                   </div>
                 )}
 
-                {/* Datasheet / GAD section */}
+                {/* Datasheet / GAD / Cell Certificate / Battery Compliance section */}
                 {linkDialogExports.length > 0 && (
                   <div className="flex flex-col gap-2">
                     {linkSizingGroups.length > 0 && <div className="border-t" />}
@@ -1614,9 +1673,14 @@ export default function PendingPage() {
                       <div key={exp.id} className="flex items-center gap-3">
                         <div className="flex-1 min-w-0">
                           <span className="text-xs font-medium truncate block">
-                            {exp.export_type === "datasheet" ? (exp.datasheet_name || "Datasheet") : (exp.gad_name || "GAD")}
+                            {exp.export_type === "datasheet" ? (exp.datasheet_name || "Datasheet")
+                              : exp.export_type === "gad" ? (exp.gad_name || "GAD")
+                              : exp.export_type === "cell_certificate" ? (exp.cell_certificate_name || "Cell Certificate")
+                              : (exp.battery_compliance_name || "Battery Compliance")}
                           </span>
-                          <span className="text-[10px] text-muted-foreground">{exp.export_type === "datasheet" ? "Datasheet" : "GAD"}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {exp.export_type === "datasheet" ? "Datasheet" : exp.export_type === "gad" ? "GAD" : exp.export_type === "cell_certificate" ? "Cell Certificate" : "Battery Compliance"}
+                          </span>
                         </div>
                         <select
                           className="h-8 rounded border px-2 text-xs bg-background w-48 shrink-0"

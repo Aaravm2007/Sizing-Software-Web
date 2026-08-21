@@ -378,11 +378,16 @@ def _write_cell(ws, addr: str, value):
     )
 
 
-def _build_excel(name: str, sr_no: Optional[int], db_path: str = None) -> str:
+def _build_excel(name: str, sr_no: Optional[int], db_path: str = None, sr_nos: Optional[list] = None) -> str:
     import openpyxl
 
     template_path = str(APP_DIR / "templates" / "Sizing_template.xlsx")
-    records = [(sr_no,)] if sr_no else [(r[0],) for r in fetch_all_sizings(name, db_path=db_path)]
+    if sr_nos:
+        records = [(sn,) for sn in sr_nos]
+    elif sr_no:
+        records = [(sr_no,)]
+    else:
+        records = [(r[0],) for r in fetch_all_sizings(name, db_path=db_path)]
 
     template_wb = openpyxl.load_workbook(template_path)
     template_ws = template_wb.active
@@ -424,11 +429,21 @@ def _build_excel(name: str, sr_no: Optional[int], db_path: str = None) -> str:
     return tmp.name
 
 
-@router.get("/projects/{name}/export/excel")
-def export_excel(name: str, sr_no: Optional[int] = None, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
-    sdb = _resolve_db(user, owner)
+def _parse_sr_nos(sr_nos: Optional[str]) -> Optional[list]:
+    if not sr_nos:
+        return None
     try:
-        path = _build_excel(name, sr_no, db_path=sdb)
+        return [int(s) for s in sr_nos.split(",") if s.strip()]
+    except ValueError:
+        raise HTTPException(400, "Invalid sr_nos")
+
+
+@router.get("/projects/{name}/export/excel")
+def export_excel(name: str, sr_no: Optional[int] = None, sr_nos: Optional[str] = None, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+    sdb = _resolve_db(user, owner)
+    sr_no_list = _parse_sr_nos(sr_nos)
+    try:
+        path = _build_excel(name, sr_no, db_path=sdb, sr_nos=sr_no_list)
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -458,7 +473,8 @@ def export_excel(name: str, sr_no: Optional[int] = None, owner: Optional[str] = 
     #     except Exception:
     #         pass
 
-    fname = f"{name}_sizing{'_'+str(sr_no) if sr_no else '_all'}.xlsx"
+    suffix = "_selected" if sr_no_list else (f"_{sr_no}" if sr_no else "_all")
+    fname = f"{name}_sizing{suffix}.xlsx"
     return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         filename=fname, background=None)
 
@@ -880,16 +896,18 @@ def get_project_quote(code: str, user=Depends(get_current_user)):
 
 
 @router.get("/projects/{name}/export/pdf")
-def export_pdf(name: str, sr_no: Optional[int] = None, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
+def export_pdf(name: str, sr_no: Optional[int] = None, sr_nos: Optional[str] = None, owner: Optional[str] = Query(None), user=Depends(get_current_user)):
     sdb = _resolve_db(user, owner)
+    sr_no_list = _parse_sr_nos(sr_nos)
     try:
-        xlsx_path = _build_excel(name, sr_no, db_path=sdb)
+        xlsx_path = _build_excel(name, sr_no, db_path=sdb, sr_nos=sr_no_list)
         pdf_path  = _xlsx_to_pdf(xlsx_path)
     except ImportError:
         raise HTTPException(501, "PDF export requires Microsoft Excel installed on the server")
     except Exception as e:
         raise HTTPException(500, str(e))
-    fname = f"{name}_sizing{'_'+str(sr_no) if sr_no else '_all'}.pdf"
+    suffix = "_selected" if sr_no_list else (f"_{sr_no}" if sr_no else "_all")
+    fname = f"{name}_sizing{suffix}.pdf"
     return FileResponse(pdf_path, media_type="application/pdf", filename=fname)
 
 

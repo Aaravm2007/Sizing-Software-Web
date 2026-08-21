@@ -36,6 +36,7 @@ interface QuoteItem {
   backup_time: string;
   quantity: number;
   quote_price: number;
+  original_price?: number | null;
   modular_rack: string;
   system_text?: string | null;
   solution_text?: string | null;
@@ -190,6 +191,11 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   // rounding
   const [roundingItem, setRoundingItem] = useState<number | null>(null);
 
+  // discount
+  const [discountItem, setDiscountItem] = useState<number | null>(null);
+  const [customDiscPct, setCustomDiscPct] = useState("");
+  const [customFinalVal, setCustomFinalVal] = useState("");
+
   const qKey = ["quote-items", code];
 
   const { data: items, isLoading } = useQuery<QuoteItem[]>({
@@ -267,6 +273,46 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       toast.error(apiErr(e, "Round failed"));
     }
     setRoundingItem(null);
+  };
+
+  // originalPrice is captured once (first discount on this item) and re-sent unchanged
+  // on every subsequent discount, so "revert" always restores the pre-discount price.
+  const applyDiscount = async (item: QuoteItem, newPrice: number) => {
+    const originalPrice = item.original_price ?? item.quote_price;
+    try {
+      await api.patch(`/api/quotation/quotes/${encodeURIComponent(code)}/items/${item.sr_no}`, {
+        quote_price: Math.round(newPrice * 100) / 100,
+        original_price: originalPrice,
+      });
+      qc.invalidateQueries({ queryKey: qKey });
+    } catch (e) {
+      toast.error(apiErr(e, "Discount failed"));
+    }
+    setDiscountItem(null);
+    setCustomDiscPct("");
+    setCustomFinalVal("");
+  };
+
+  const handleRevertDiscount = async (sr_no: number) => {
+    try {
+      await api.post(`/api/quotation/quotes/${encodeURIComponent(code)}/items/${sr_no}/revert-discount`);
+      qc.invalidateQueries({ queryKey: qKey });
+    } catch (e) {
+      toast.error(apiErr(e, "Revert failed"));
+    }
+  };
+
+  // compounding: each step % off the running total
+  const DISCOUNT_PRESETS: { label: string; steps: number[] }[] = [
+    { label: "6%",      steps: [6] },
+    { label: "10%",     steps: [10] },
+    { label: "10%+5%",  steps: [10, 5] },
+    { label: "15%",     steps: [15] },
+  ];
+
+  const handlePresetDiscount = (item: QuoteItem, price: number, steps: number[]) => {
+    const discounted = steps.reduce((p, pct) => p * (1 - pct / 100), price);
+    applyDiscount(item, discounted);
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -488,6 +534,14 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-muted-foreground uppercase font-medium">Unit Price</span>
                 <span>Rs. {price.toLocaleString("en-IN")}/- +GST</span>
+                {item.original_price != null && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground/70">
+                      Original: Rs. {item.original_price.toLocaleString("en-IN")}/-
+                    </span>
+                    <button onClick={() => handleRevertDiscount(item.sr_no)} className="text-[11px] text-muted-foreground hover:text-foreground underline" title="Revert to original price">↺ Revert</button>
+                  </div>
+                )}
                 {roundingItem === item.sr_no ? (
                   <div className="flex gap-1 mt-1">
                     <button onClick={() => handleRound(item.sr_no, price, "ceil")} className="text-xs border rounded px-1.5 py-0.5 hover:bg-muted" title="Round up">⌈ Up</button>
@@ -497,6 +551,46 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                   </div>
                 ) : (
                   <button onClick={() => setRoundingItem(item.sr_no)} className="text-xs text-muted-foreground hover:text-foreground mt-1 text-left">⌈ Round</button>
+                )}
+                {discountItem === item.sr_no ? (
+                  <div className="flex flex-col gap-1 mt-1">
+                    <div className="flex gap-1 flex-wrap">
+                      {DISCOUNT_PRESETS.map(({ label, steps }) => (
+                        <button key={label} onClick={() => handlePresetDiscount(item, price, steps)} className="text-xs border rounded px-1.5 py-0.5 hover:bg-muted" title={`${label} off`}>{label}</button>
+                      ))}
+                      <button onClick={() => { setDiscountItem(null); setCustomDiscPct(""); setCustomFinalVal(""); }} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        placeholder="Custom %"
+                        value={customDiscPct}
+                        onChange={e => setCustomDiscPct(e.target.value)}
+                        className="w-20 text-xs border rounded px-1.5 py-0.5 bg-background"
+                      />
+                      <button
+                        onClick={() => { const pct = parseFloat(customDiscPct); if (!isNaN(pct)) handlePresetDiscount(item, price, [pct]); }}
+                        disabled={!customDiscPct}
+                        className="text-xs border rounded px-1.5 py-0.5 hover:bg-muted disabled:opacity-40"
+                      >Apply %</button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        placeholder="Final value"
+                        value={customFinalVal}
+                        onChange={e => setCustomFinalVal(e.target.value)}
+                        className="w-20 text-xs border rounded px-1.5 py-0.5 bg-background"
+                      />
+                      <button
+                        onClick={() => { const v = parseFloat(customFinalVal); if (!isNaN(v)) applyDiscount(item, v); }}
+                        disabled={!customFinalVal}
+                        className="text-xs border rounded px-1.5 py-0.5 hover:bg-muted disabled:opacity-40"
+                      >Apply Value</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setDiscountItem(item.sr_no)} className="text-xs text-muted-foreground hover:text-foreground text-left">✂ Discount</button>
                 )}
               </div>
               <div className="flex flex-col gap-1">

@@ -25,7 +25,7 @@ _COLS = [
     "cc3_desc", "cc3_price",
     "cc4_desc", "cc4_price",
     "cc5_desc", "cc5_price",
-    "datasheet", "sizing_sheet", "gad", "battery_compliance", "warranty",
+    "datasheet", "sizing_sheet", "gad", "cell_certificate", "battery_compliance", "warranty",
     "remarks", "handled_by",
     "submission_date", "submitted_to", "submitted_by", "created_at", "quote_code", "sol_no",
     "dollar_rate", "base_partcode", "quote_format",
@@ -46,6 +46,10 @@ _DATE_FILTER_COLS   = frozenset({"inquiry_date", "submission_date"})
 _TEXT_FILTER_COLS   = frozenset({
     "inquiry_code", "type", "sales_person", "solution_provider",
     "project_customer", "cell_chemistry", "handled_by", "submitted_to", "submitted_by",
+    "ups_make", "ups_model", "ups_kva", "actual_load_kva", "load_kw",
+    "power_factor", "inverter_efficiency", "dc_voltage", "backup_min",
+    "ageing_pct", "design_margin_pct", "dod_margin_pct", "derating_pct",
+    "capacity_ah", "backup_time_min", "part_code",
 })
 _ALL_FILTER_COLS = _SELECT_FILTER_COLS | _DATE_FILTER_COLS | _TEXT_FILTER_COLS
 
@@ -367,6 +371,8 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
     sizing_exports = [e for e in exports if e.get("export_type", "").startswith("sizing_")]
     ds_exports     = [e for e in exports if e.get("export_type") == "datasheet"]
     gad_exports    = [e for e in exports if e.get("export_type") == "gad"]
+    cc_exports     = [e for e in exports if e.get("export_type") == "cell_certificate"]
+    bc_exports     = [e for e in exports if e.get("export_type") == "battery_compliance"]
 
     sol_nos = list(dict.fromkeys(
         e.get("sol_no", "") for e in quote_exports if e.get("sol_no", "")
@@ -430,13 +436,16 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
 
             ds_flag  = "YES" if any(e.get("sol_no") == sol_no for e in ds_exports)  else "NO"
             gad_flag = "YES" if any(e.get("sol_no") == sol_no for e in gad_exports) else "NO"
+            cc_flag  = "YES" if any(e.get("sol_no") == sol_no for e in cc_exports)  else "NO"
+            bc_flag  = "YES" if any(e.get("sol_no") == sol_no for e in bc_exports)  else "NO"
 
             base_type = str(latest_q.get("type", "") or "")
             row_data = {
                 **_pending_base, **sizing_data, **quote_data,
                 "sol_no": sol_no,
                 "type": f"{base_type} - Sol {sol_no}" if base_type else f"Sol {sol_no}",
-                "datasheet": ds_flag, "gad": gad_flag, "sizing_sheet": sz_flag,
+                "datasheet": ds_flag, "gad": gad_flag, "cell_certificate": cc_flag,
+                "battery_compliance": bc_flag, "sizing_sheet": sz_flag,
             }
 
             cur.execute(
@@ -473,6 +482,22 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
             fname = str(e.get("gad_name", "") or "").strip()
             if fname:
                 _insert(cur, {**_pending_base, "type": "GAD", "part_code": fname})
+
+        # ── unlinked / standalone cell certificates → own row ──
+        for e in cc_exports:
+            if not _is_standalone(e):
+                continue
+            fname = str(e.get("cell_certificate_name", "") or "").strip()
+            if fname:
+                _insert(cur, {**_pending_base, "type": "Cell Certificate", "part_code": fname})
+
+        # ── unlinked / standalone battery compliance certs → own row ──
+        for e in bc_exports:
+            if not _is_standalone(e):
+                continue
+            fname = str(e.get("battery_compliance_name", "") or "").strip()
+            if fname:
+                _insert(cur, {**_pending_base, "type": "Battery Compliance", "part_code": fname})
 
         # ── unlinked / standalone sizing → one row per unique fingerprint ──
         def _sz_fp(e):

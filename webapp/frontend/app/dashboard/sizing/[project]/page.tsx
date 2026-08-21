@@ -36,7 +36,7 @@ export default function SizingListPage() {
   const withOwner = (url: string) => owner ? `${url}${url.includes("?") ? "&" : "?"}${ownerQS}` : url;
   const withOwnerLink = (url: string) => owner ? `${url}?${ownerQS}` : url;
 
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [addingRow, setAddingRow] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<"all" | "selected">("all");
@@ -47,6 +47,7 @@ export default function SizingListPage() {
   const [pendingExportDataList, setPendingExportDataList] = useState<Record<string, string>[] | undefined>(undefined);
   const [directLinkOpen, setDirectLinkOpen] = useState(false);
   const [directLinkData, setDirectLinkData] = useState<Record<string, string>>({ export_type: "sizing_excel" });
+  const [directLinkDataList, setDirectLinkDataList] = useState<Record<string, string>[] | undefined>(undefined);
 const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
   const [pendingAction, setPendingActionState] = useState(() => getPendingAction());
@@ -74,9 +75,9 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   const deleteMut = useMutation({
     mutationFn: (sr: number) =>
       api.delete(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`)),
-    onSuccess: () => {
+    onSuccess: (_data, sr) => {
       qc.invalidateQueries({ queryKey: qKey });
-      setSelected(null);
+      setSelected((prev) => { const next = new Set(prev); next.delete(sr); return next; });
     },
     onError: (e: any) => toast.error(apiErr(e, "Delete failed")),
   });
@@ -106,8 +107,11 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
   };
 
   const doExport = () => {
-    const sr = exportScope === "selected" ? selected : null;
-    const srParam = sr != null ? `?sr_no=${sr}` : "";
+    let srParam = "";
+    if (exportScope === "selected") {
+      const arr = Array.from(selected);
+      srParam = arr.length > 1 ? `?sr_nos=${arr.join(",")}` : arr.length === 1 ? `?sr_no=${arr[0]}` : "";
+    }
     const endpoint = withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/export/${exportFormat}${srParam}`);
     api.get(endpoint, { responseType: "blob" }).then((res) => {
       const ext = exportFormat === "excel" ? "xlsx" : "pdf";
@@ -146,10 +150,11 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
   const handleExport = async () => {
     setExportOpen(false);
-    if (exportScope === "selected" && selected != null) {
+    if (exportScope === "selected" && selected.size === 1) {
+      const sr = Array.from(selected)[0];
       try {
         const row = await api.get(
-          withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selected}`)
+          withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`)
         ).then((r) => r.data);
         setPendingExportData(_rowToExportData(row, exportFormat));
       } catch {
@@ -157,10 +162,11 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
       }
       setPendingExportDataList(undefined);
     } else {
-      // Export All — fetch every sizing and build one entry per sizing
+      // Export All, or 2+ selected — fetch each sizing and build one entry per sizing
+      const targetRows = exportScope === "selected" ? sizings.filter((s) => selected.has(s.sr_no)) : sizings;
       try {
         const rows = await Promise.all(
-          sizings.map((s) =>
+          targetRows.map((s) =>
             api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`))
               .then((r) => r.data).catch(() => null)
           )
@@ -175,6 +181,53 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
     }
     setPendingExportFn(() => doExport);
     setPendingLinkOpen(true);
+  };
+
+  const selectedArr = Array.from(selected);
+  const singleSr = selectedArr.length === 1 ? selectedArr[0] : null;
+
+  const handleDirectLink = async () => {
+    if (selectedArr.length === 0) return;
+    const rowToData = (data: any): Record<string, string> => ({
+      export_type: "sizing_excel",
+      ups_make: String(data.ups_make ?? ""),
+      ups_model: String(data.ups_model ?? ""),
+      ups_kva: String(data.ups_rating_kva ?? ""),
+      actual_load_kva: String(data.actual_load_kva ?? ""),
+      load_kw: String(data.actual_load_kw ?? ""),
+      power_factor: String(data.power_factor ?? ""),
+      inverter_efficiency: String(data.inverter_efficiency ?? ""),
+      dc_voltage: String(data.nominal_dc_voltage ?? ""),
+      backup_min: String(data.backup_requirement_min ?? ""),
+      cell_chemistry: String(data.cell_chemistry ?? ""),
+      ageing_pct: String(data.ageing_percent ?? ""),
+      design_margin_pct: String(data.design_margin_percent ?? ""),
+      dod_margin_pct: String(data.dod_margin_percent ?? ""),
+      derating_pct: String(data.derating_factor_percent ?? ""),
+      capacity_ah: String(data.nearest_capacity_ah ?? ""),
+      ageing_type: String(data.ageing_type ?? ""),
+      backup_time_min: String(data.backup_time_min ?? ""),
+    });
+    try {
+      if (selectedArr.length === 1) {
+        const data = await api.get(
+          withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selectedArr[0]}`)
+        ).then((r) => r.data);
+        setDirectLinkData(rowToData(data));
+        setDirectLinkDataList(undefined);
+      } else {
+        const rows = await Promise.all(
+          selectedArr.map((sr) =>
+            api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`))
+              .then((r) => r.data).catch(() => null)
+          )
+        );
+        const list = rows.filter(Boolean).map(rowToData);
+        setDirectLinkDataList(list.length > 0 ? list : undefined);
+        setDirectLinkData(list[0] ?? { export_type: "sizing_excel" });
+      }
+      setDirectLinkOpen(true);
+    } catch { toast.error("Failed to load sizing data"); }
   };
 
   return (
@@ -224,6 +277,13 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         <table className="table-grid w-full text-sm">
           <thead className="bg-muted sticky top-0">
             <tr>
+              <th className="text-center py-2 px-2 w-10">
+                <input
+                  type="checkbox"
+                  checked={sizings.length > 0 && selected.size === sizings.length}
+                  onChange={(e) => setSelected(e.target.checked ? new Set(sizings.map((s) => s.sr_no)) : new Set())}
+                />
+              </th>
               <th className="text-center py-2 px-4 w-24">Sr. No</th>
               <th className="text-center py-2 px-4">Offered Battery Configuration</th>
               <th className="text-center py-2 px-4 w-52">Actions</th>
@@ -232,26 +292,38 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={3} className="text-center py-8 text-muted-foreground">Loading…</td>
+                <td colSpan={4} className="text-center py-8 text-muted-foreground">Loading…</td>
               </tr>
             )}
             {!isLoading && sizings.length === 0 && (
               <tr>
-                <td colSpan={3} className="text-center py-8 text-muted-foreground">No sizings yet</td>
+                <td colSpan={4} className="text-center py-8 text-muted-foreground">No sizings yet</td>
               </tr>
             )}
             {sizings.map((s) => (
               <tr
                 key={s.sr_no}
-                className={`cursor-pointer hover:bg-accent ${selected === s.sr_no ? "bg-primary/20" : ""}`}
-                onClick={() => setSelected(s.sr_no)}
+                className={`hover:bg-accent ${selected.has(s.sr_no) ? "bg-primary/20" : ""}`}
                 onDoubleClick={() =>
                   router.push(withOwnerLink(`/dashboard/sizing/${encodeURIComponent(projectName)}/${s.sr_no}`))
                 }
               >
+                <td className="text-center py-2 px-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(s.sr_no)}
+                    onChange={(e) =>
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(s.sr_no); else next.delete(s.sr_no);
+                        return next;
+                      })
+                    }
+                  />
+                </td>
                 <td className="text-center py-2 px-4">{s.sr_no}</td>
                 <td className="text-center py-2 px-4">{s.offered_battery_config || "—"}</td>
-                <td className="text-center py-1 px-2" onClick={(e) => e.stopPropagation()}>
+                <td className="text-center py-1 px-2">
                   <div className="flex gap-1 justify-center">
                     <Button size="icon" variant="outline" title="Duplicate"
                       disabled={dupMut.isPending}
@@ -259,7 +331,7 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                       <Copy className="h-4 w-4" />
                     </Button>
                     <Button size="icon" variant="outline" title="Export"
-                      onClick={() => { setSelected(s.sr_no); setExportScope("selected"); setExportOpen(true); }}>
+                      onClick={() => { setSelected(new Set([s.sr_no])); setExportScope("selected"); setExportOpen(true); }}>
                       <Download className="h-4 w-4" />
                     </Button>
                     <Button size="icon" variant="destructive" title="Delete"
@@ -282,48 +354,22 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         </Button>
         <Button
           variant="outline"
-          disabled={!selected}
-          onClick={async () => {
-            if (!selected) return;
-            const row = sizings.find((s) => s.sr_no === selected);
-            try {
-              const data = await api.get(
-                withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${selected}`)
-              ).then((r) => r.data);
-              setDirectLinkData({
-                export_type: "sizing_excel",
-                ups_make: String(data.ups_make ?? ""),
-                ups_model: String(data.ups_model ?? ""),
-                ups_kva: String(data.ups_rating_kva ?? ""),
-                actual_load_kva: String(data.actual_load_kva ?? ""),
-                load_kw: String(data.actual_load_kw ?? ""),
-                power_factor: String(data.power_factor ?? ""),
-                inverter_efficiency: String(data.inverter_efficiency ?? ""),
-                dc_voltage: String(data.nominal_dc_voltage ?? ""),
-                backup_min: String(data.backup_requirement_min ?? ""),
-                cell_chemistry: String(data.cell_chemistry ?? ""),
-                ageing_pct: String(data.ageing_percent ?? ""),
-                design_margin_pct: String(data.design_margin_percent ?? ""),
-                dod_margin_pct: String(data.dod_margin_percent ?? ""),
-                derating_pct: String(data.derating_factor_percent ?? ""),
-                capacity_ah: String(data.nearest_capacity_ah ?? ""),
-                ageing_type: String(data.ageing_type ?? ""),
-                backup_time_min: String(data.backup_time_min ?? ""),
-              });
-              setDirectLinkOpen(true);
-            } catch { toast.error("Failed to load sizing data"); }
-          }}
+          disabled={selectedArr.length === 0}
+          onClick={handleDirectLink}
         >
           <Link2 size={14} />
-          Link {sizings.find((s) => s.sr_no === selected)?.offered_battery_config
-            ? `"${sizings.find((s) => s.sr_no === selected)!.offered_battery_config}" `
-            : ""}to Pending
+          Link {selectedArr.length === 1
+            ? (sizings.find((s) => s.sr_no === singleSr)?.offered_battery_config
+                ? `"${sizings.find((s) => s.sr_no === singleSr)!.offered_battery_config}" `
+                : "")
+            : selectedArr.length > 1 ? `${selectedArr.length} ` : ""}
+          to Pending
         </Button>
         <Button
           variant="outline"
-          disabled={!selected}
+          disabled={singleSr == null}
           onClick={() => {
-            const config = sizings.find((s) => s.sr_no === selected)?.offered_battery_config ?? "";
+            const config = sizings.find((s) => s.sr_no === singleSr)?.offered_battery_config ?? "";
             router.push(`/dashboard/gad?q=${encodeURIComponent(config)}`);
           }}
         >
@@ -331,13 +377,33 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
         </Button>
         <Button
           variant="outline"
-          disabled={!selected}
+          disabled={singleSr == null}
           onClick={() => {
-            const config = sizings.find((s) => s.sr_no === selected)?.offered_battery_config ?? "";
+            const config = sizings.find((s) => s.sr_no === singleSr)?.offered_battery_config ?? "";
             router.push(`/dashboard/datasheet?q=${encodeURIComponent(config)}`);
           }}
         >
           Download Datasheet
+        </Button>
+        <Button
+          variant="outline"
+          disabled={singleSr == null}
+          onClick={() => {
+            const config = sizings.find((s) => s.sr_no === singleSr)?.offered_battery_config ?? "";
+            router.push(`/dashboard/cell-certificates?q=${encodeURIComponent(config)}`);
+          }}
+        >
+          Download Cell Certificate
+        </Button>
+        <Button
+          variant="outline"
+          disabled={singleSr == null}
+          onClick={() => {
+            const config = sizings.find((s) => s.sr_no === singleSr)?.offered_battery_config ?? "";
+            router.push(`/dashboard/battery-compliance?q=${encodeURIComponent(config)}`);
+          }}
+        >
+          Download Battery Compliance
         </Button>
         <Button
           variant="outline"
@@ -375,16 +441,16 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
                   />
                   All
                 </label>
-                <label className={`flex items-center gap-1 ${!selected ? "opacity-50" : "cursor-pointer"}`}>
+                <label className={`flex items-center gap-1 ${selectedArr.length === 0 ? "opacity-50" : "cursor-pointer"}`}>
                   <input
                     type="radio"
                     name="scope"
                     value="selected"
-                    disabled={!selected}
+                    disabled={selectedArr.length === 0}
                     checked={exportScope === "selected"}
                     onChange={() => setExportScope("selected")}
                   />
-                  Selected ({selected ?? "none"})
+                  Selected ({selectedArr.length || "none"})
                 </label>
               </div>
             </div>
@@ -417,19 +483,22 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
           <DialogFooter className="flex-col gap-2 sm:flex-col">
             <Button onClick={handleExport} className="w-full">Export</Button>
             <Button variant="outline" className="w-full" onClick={async () => {
-              const sr = exportScope === "selected" ? selected : null;
               try {
                 let name: string; let data: any;
-                if (sr != null) {
+                if (exportScope === "selected" && selectedArr.length === 1) {
+                  const sr = selectedArr[0];
                   const r = await api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${sr}`));
                   const row = sizings.find((s) => s.sr_no === sr);
                   name = `${projectName} — Sr. ${sr}${row?.offered_battery_config ? ` (${row.offered_battery_config})` : ""}`;
                   data = { project_name: projectName, form: r.data };
                 } else {
+                  const targetRows = exportScope === "selected" ? sizings.filter((s) => selected.has(s.sr_no)) : sizings;
                   const forms = (await Promise.all(
-                    sizings.map((s) => api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`)).then((r) => r.data).catch(() => null))
+                    targetRows.map((s) => api.get(withOwner(`/api/sizing/projects/${encodeURIComponent(projectName)}/sizings/${s.sr_no}`)).then((r) => r.data).catch(() => null))
                   )).filter(Boolean);
-                  name = `${projectName} — All (${forms.length} sizing${forms.length !== 1 ? "s" : ""})`;
+                  name = exportScope === "selected"
+                    ? `${projectName} — Selected (${forms.length} sizing${forms.length !== 1 ? "s" : ""})`
+                    : `${projectName} — All (${forms.length} sizing${forms.length !== 1 ? "s" : ""})`;
                   data = { project_name: projectName, forms };
                 }
                 setExportOpen(false);
@@ -452,11 +521,16 @@ const [approvalItem, setApprovalItem] = useState<ApprovalItem | null>(null);
 
       <PendingLinkDialog
         open={directLinkOpen}
-        exportLabel={`${sizings.find((s) => s.sr_no === selected)?.offered_battery_config || `Sr. ${selected}`} — ${projectName}`}
+        exportLabel={
+          selectedArr.length === 1
+            ? `${sizings.find((s) => s.sr_no === singleSr)?.offered_battery_config || `Sr. ${singleSr}`} — ${projectName}`
+            : `${selectedArr.length} sizings — ${projectName}`
+        }
         exportData={directLinkData}
+        exportDataList={directLinkDataList}
         actionLabel="Link to Pending"
-        onClose={() => setDirectLinkOpen(false)}
-        onDone={() => { setDirectLinkOpen(false); toast.success("Sizing linked to pending item"); }}
+        onClose={() => { setDirectLinkOpen(false); setDirectLinkDataList(undefined); }}
+        onDone={() => { setDirectLinkOpen(false); setDirectLinkDataList(undefined); toast.success("Sizing linked to pending item"); }}
       />
     </div>
   );

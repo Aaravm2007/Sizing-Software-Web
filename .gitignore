@@ -9,6 +9,7 @@ webapp/backend/.env
 
 # ── Databases ─────────────────────────────────────────────────────────────────
 *.sqlite3
+/db_backups/
 
 
 # ── Desktop / tkinter app (not needed for web) ────────────────────────────────

@@ -35,7 +35,7 @@ _QI_COLS = ["code", "format", "date", "solution_provider", "customer_name",
             "sr_no", "sol_no", "ups_rating", "backup_requirement", "calc_load",
             "celltype", "centre_tapping", "batterypartcode", "backup_time",
             "quantity", "quote_price", "modular_rack", "system_text", "solution_text",
-            "calc_load_unit", "item_type", "ageing_type"]
+            "calc_load_unit", "item_type", "ageing_type", "original_price"]
 _QI_SELECT = ", ".join(f'"{c}"' for c in _QI_COLS)
 
 
@@ -188,7 +188,7 @@ def update_item_fields(quote_code, sr_no, fields: dict, db_path=None):
     if not fields:
         return
     coerced = {
-        k: (_num(v, int) if k == "quantity" else _num(v, float) if k == "quote_price" else _txt(v))
+        k: (_num(v, int) if k == "quantity" else _num(v, float) if k in ("quote_price", "original_price") else _txt(v))
         for k, v in fields.items()
     }
     sets = ", ".join(f'"{k}" = %s' for k in coerced)
@@ -197,6 +197,19 @@ def update_item_fields(quote_code, sr_no, fields: dict, db_path=None):
             f'UPDATE quote_items SET {sets}'
             ' WHERE username = %s AND scope = %s AND quote_code = %s AND sr_no = %s',
             list(coerced.values()) + [username, scope, quote_code, sr_no],
+        )
+
+
+def revert_discount(quote_code, sr_no, db_path=None):
+    """Restore quote_price from original_price and clear original_price.
+    No-op if the item has no discount applied (original_price is NULL)."""
+    username, scope = _scope(db_path)
+    with get_conn() as conn:
+        conn.cursor().execute(
+            """UPDATE quote_items SET quote_price = original_price, original_price = NULL
+               WHERE username = %s AND scope = %s AND quote_code = %s AND sr_no = %s
+                 AND original_price IS NOT NULL""",
+            (username, scope, quote_code, sr_no),
         )
 
 

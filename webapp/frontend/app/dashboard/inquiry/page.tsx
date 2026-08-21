@@ -16,7 +16,7 @@ import { GLOBAL_KEY, type FilterValues } from "@/lib/use-table-filter";
 
 // ── column definitions ────────────────────────────────────────────────────────
 
-type YNField = "centre_tap" | "datasheet" | "sizing_sheet" | "gad" | "battery_compliance";
+type YNField = "centre_tap" | "datasheet" | "sizing_sheet" | "gad" | "cell_certificate" | "battery_compliance";
 
 interface Col {
   key: string;
@@ -37,22 +37,22 @@ const COLS: Col[] = [
   { key: "ups_make",            label: "UPS Make",            width: 100, type: "text",   filterType: "text" },
   { key: "ups_model",           label: "UPS Model",           width: 100, type: "text",   filterType: "text" },
   { key: "ups_kva",             label: "UPS (KVA)",           width: 80,  type: "text",   filterType: "text" },
-  { key: "actual_load_kva",     label: "Load (KVA)",          width: 80,  type: "text"   },
-  { key: "load_kw",             label: "Load (KW)",           width: 80,  type: "text"   },
-  { key: "power_factor",        label: "Power Factor",        width: 85,  type: "text"   },
-  { key: "inverter_efficiency", label: "Inv. Eff (%)",        width: 80,  type: "text"   },
-  { key: "dc_voltage",          label: "DC Voltage",          width: 90,  type: "text"   },
-  { key: "backup_min",          label: "Backup (min)",        width: 90,  type: "text"   },
+  { key: "actual_load_kva",     label: "Load (KVA)",          width: 80,  type: "text",   filterType: "text" },
+  { key: "load_kw",             label: "Load (KW)",           width: 80,  type: "text",   filterType: "text" },
+  { key: "power_factor",        label: "Power Factor",        width: 85,  type: "text",   filterType: "text" },
+  { key: "inverter_efficiency", label: "Inv. Eff (%)",        width: 80,  type: "text",   filterType: "text" },
+  { key: "dc_voltage",          label: "DC Voltage",          width: 90,  type: "text",   filterType: "text" },
+  { key: "backup_min",          label: "Backup (min)",        width: 90,  type: "text",   filterType: "text" },
   { key: "cell_chemistry",      label: "Chemistry",           width: 80,  type: "text",   filterType: "text" },
-  { key: "ageing_pct",          label: "Ageing (%)",          width: 75,  type: "text"   },
-  { key: "design_margin_pct",   label: "Design Margin (%)",   width: 110, type: "text"   },
-  { key: "dod_margin_pct",      label: "DOD Margin (%)",      width: 100, type: "text"   },
-  { key: "derating_pct",        label: "Derating (%)",        width: 85,  type: "text"   },
-  { key: "capacity_ah",         label: "Capacity (Ah)",       width: 100, type: "text"   },
+  { key: "ageing_pct",          label: "Ageing (%)",          width: 75,  type: "text",   filterType: "text" },
+  { key: "design_margin_pct",   label: "Design Margin (%)",   width: 110, type: "text",   filterType: "text" },
+  { key: "dod_margin_pct",      label: "DOD Margin (%)",      width: 100, type: "text",   filterType: "text" },
+  { key: "derating_pct",        label: "Derating (%)",        width: 85,  type: "text",   filterType: "text" },
+  { key: "capacity_ah",         label: "Capacity (Ah)",       width: 100, type: "text",   filterType: "text" },
   { key: "centre_tap",  label: "Centre Tap", width: 90,  type: "text", filterType: "select", filterOptions: [{ value: "Centre Tap", label: "Centre Tap" }, { value: "Non Centre Tap", label: "Non Centre Tap" }] },
   { key: "cell_type",   label: "Cell Type",  width: 110, type: "text", filterType: "select", filterOptions: [{ value: "Prismatic", label: "Prismatic" }, { value: "Cylindrical", label: "Cylindrical" }] },
   { key: "ageing_type", label: "BOL/EOL",    width: 70,  type: "text", filterType: "select", filterOptions: [{ value: "BOL", label: "BOL" }, { value: "EOL", label: "EOL" }] },
-  { key: "backup_time_min",   label: "Backup Time (min)",  width: 120, type: "text"   },
+  { key: "backup_time_min",   label: "Backup Time (min)",  width: 120, type: "text",   filterType: "text" },
   { key: "part_code",         label: "Part Code",          width: 200, type: "text",   filterType: "text" },
   { key: "qty_system",        label: "Qty (System)",       width: 85,  type: "number" },
   { key: "rate_system",       label: "Rate (System ₹)",    width: 120, type: "number" },
@@ -78,6 +78,7 @@ const COLS: Col[] = [
   { key: "datasheet",         label: "Datasheet",          width: 90,  type: "yn"     },
   { key: "sizing_sheet",      label: "Sizing Sheet",       width: 95,  type: "yn"     },
   { key: "gad",               label: "GAD",                width: 60,  type: "yn"     },
+  { key: "cell_certificate",  label: "Cell Cert.",         width: 85,  type: "yn"     },
   { key: "battery_compliance",label: "Bat. Compliance",    width: 115, type: "yn"     },
   { key: "warranty",          label: "Warranty (yrs)",     width: 100, type: "text"   },
   { key: "dollar_rate",       label: "Dollar Rate",        width: 100, type: "text"   },
@@ -122,7 +123,7 @@ const QUOTATION_KEYS = new Set([
   "cc4_desc","cc4_price","cc5_desc","cc5_price",
 ]);
 const OTHER_KEYS = new Set([
-  "datasheet","sizing_sheet","gad","battery_compliance","warranty","dollar_rate",
+  "datasheet","sizing_sheet","gad","cell_certificate","battery_compliance","warranty","dollar_rate",
 ]);
 
 // ── inquiry code row colours ──────────────────────────────────────────────────

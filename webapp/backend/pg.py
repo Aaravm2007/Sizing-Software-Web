@@ -134,6 +134,8 @@ CREATE TABLE IF NOT EXISTS pending_items (
     submitted_to        TEXT DEFAULT '',
     datasheet_name      TEXT DEFAULT '',
     gad_name            TEXT DEFAULT '',
+    cell_certificate_name TEXT DEFAULT '',
+    battery_compliance_name TEXT DEFAULT '',
     remarks             TEXT DEFAULT '',
     sol_no              TEXT DEFAULT '',
     type                TEXT DEFAULT '',
@@ -206,6 +208,8 @@ CREATE TABLE IF NOT EXISTS export_history (
     submitted_to        TEXT DEFAULT '',
     datasheet_name      TEXT DEFAULT '',
     gad_name            TEXT DEFAULT '',
+    cell_certificate_name TEXT DEFAULT '',
+    battery_compliance_name TEXT DEFAULT '',
     remarks             TEXT DEFAULT '',
     sol_no              TEXT DEFAULT '',
     type                TEXT DEFAULT '',
@@ -277,6 +281,7 @@ CREATE TABLE IF NOT EXISTS inquiry (
     datasheet           TEXT,
     sizing_sheet        TEXT,
     gad                 TEXT,
+    cell_certificate    TEXT,
     battery_compliance  TEXT,
     warranty            TEXT,
     remarks             TEXT,
@@ -335,7 +340,8 @@ CREATE TABLE IF NOT EXISTS quote_items (
     system_text       TEXT,
     solution_text     TEXT,
     item_type         TEXT DEFAULT 'system',
-    ageing_type       TEXT DEFAULT 'BOL'
+    ageing_type       TEXT DEFAULT 'BOL',
+    original_price    REAL
 );
 CREATE INDEX IF NOT EXISTS idx_quote_items ON quote_items(username, scope, quote_code);
 
@@ -554,6 +560,8 @@ INSERT INTO quote_rates VALUES ('fire_suppression', 6100.0, 'Fire Suppression Sy
 INSERT INTO quote_rates VALUES ('rmd_hvl', 6400.0, 'Remote Monitoring Device HVL (per module)') ON CONFLICT DO NOTHING;
 INSERT INTO quote_rates VALUES ('rmd_efl', 4850.0, 'Remote Monitoring Device EFL (per module)') ON CONFLICT DO NOTHING;
 INSERT INTO quote_rates VALUES ('subscription', 1500.0, 'Subscription Charges (per year)') ON CONFLICT DO NOTHING;
+INSERT INTO quote_rates VALUES ('cell_clearing_customs_pct', 7.5, 'Cell Clearing & Customs %') ON CONFLICT DO NOTHING;
+INSERT INTO quote_rates VALUES ('bms_clearing_customs_pct', 18.0, 'BMS/PCM Clearing & Customs %') ON CONFLICT DO NOTHING;
 
 INSERT INTO modular_rack_rates VALUES ('W=600*D=1000*H=880',  30000.0) ON CONFLICT DO NOTHING;
 INSERT INTO modular_rack_rates VALUES ('W=600*D=1000*H=1392', 40000.0) ON CONFLICT DO NOTHING;
@@ -570,6 +578,12 @@ INSERT INTO modular_rack_rates VALUES ('W=600*D=1400*H=1882', 70000.0) ON CONFLI
 _MIGRATE = """
 ALTER TABLE active_quotes ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'normal';
 ALTER TABLE quote_items  ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'normal';
+ALTER TABLE pending_items   ADD COLUMN IF NOT EXISTS cell_certificate_name TEXT DEFAULT '';
+ALTER TABLE export_history  ADD COLUMN IF NOT EXISTS cell_certificate_name TEXT DEFAULT '';
+ALTER TABLE inquiry         ADD COLUMN IF NOT EXISTS cell_certificate TEXT;
+ALTER TABLE pending_items   ADD COLUMN IF NOT EXISTS battery_compliance_name TEXT DEFAULT '';
+ALTER TABLE export_history  ADD COLUMN IF NOT EXISTS battery_compliance_name TEXT DEFAULT '';
+ALTER TABLE quote_items     ADD COLUMN IF NOT EXISTS original_price REAL;
 """
 
 
