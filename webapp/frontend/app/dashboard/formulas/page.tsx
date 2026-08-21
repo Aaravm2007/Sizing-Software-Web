@@ -662,7 +662,7 @@ function QuoteRatesTable() {
       <TableHeader>
         <TableRow>
           <TableHead>Item</TableHead>
-          <TableHead className="text-right">Rate (₹)</TableHead>
+          <TableHead className="text-right">Rate</TableHead>
           <TableHead className="w-20" />
         </TableRow>
       </TableHeader>
@@ -677,7 +677,9 @@ function QuoteRatesTable() {
                   onKeyDown={(e) => { if (e.key === "Enter") save.mutate({ key: r.key, value: parseFloat(editVal) || 0 }); if (e.key === "Escape") setEditKey(null); }}
                   autoFocus />
               ) : (
-                <span className="font-mono">₹{r.value.toLocaleString()}</span>
+                <span className="font-mono">
+                  {r.key.endsWith("_pct") ? `${r.value}%` : `₹${r.value.toLocaleString()}`}
+                </span>
               )}
             </TableCell>
             <TableCell>
