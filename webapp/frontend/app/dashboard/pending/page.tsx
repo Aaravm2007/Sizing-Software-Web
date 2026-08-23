@@ -790,17 +790,17 @@ export default function PendingPage() {
 
       {tab === "global" && (
         <div className="flex justify-end gap-2">
-          <div className="flex flex-col items-center px-3 py-1.5 rounded-md border bg-muted/30 min-w-[92px]">
-            <span className="text-lg font-bold leading-tight">{globalStats.receivedToday}</span>
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Received Today</span>
+          <div className="flex items-center gap-1.5 px-3 py-0.5 rounded-md border bg-muted/30 min-w-[92px] justify-center">
+            <span className="text-sm font-bold leading-none">{globalStats.receivedToday}</span>
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wide leading-none">Received Today</span>
           </div>
-          <div className="flex flex-col items-center px-3 py-1.5 rounded-md border bg-muted/30 min-w-[92px]">
-            <span className="text-lg font-bold leading-tight">{globalStats.overallPending}</span>
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Overall Pending</span>
+          <div className="flex items-center gap-1.5 px-3 py-0.5 rounded-md border bg-muted/30 min-w-[92px] justify-center">
+            <span className="text-sm font-bold leading-none">{globalStats.overallPending}</span>
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wide leading-none">Overall Pending</span>
           </div>
-          <div className="flex flex-col items-center px-3 py-1.5 rounded-md border bg-muted/30 min-w-[92px]">
-            <span className="text-lg font-bold leading-tight">{globalStats.completedToday}</span>
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Completed Today</span>
+          <div className="flex items-center gap-1.5 px-3 py-0.5 rounded-md border bg-muted/30 min-w-[92px] justify-center">
+            <span className="text-sm font-bold leading-none">{globalStats.completedToday}</span>
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wide leading-none">Completed Today</span>
           </div>
         </div>
       )}
