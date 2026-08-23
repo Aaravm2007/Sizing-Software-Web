@@ -592,6 +592,7 @@ ALTER TABLE pending_items   ADD COLUMN IF NOT EXISTS battery_compliance_name TEX
 ALTER TABLE export_history  ADD COLUMN IF NOT EXISTS battery_compliance_name TEXT DEFAULT '';
 ALTER TABLE quote_items     ADD COLUMN IF NOT EXISTS original_price REAL;
 DELETE FROM quote_rates WHERE key IN ('cell_clearing_customs_pct', 'bms_clearing_customs_pct');
+ALTER TABLE pending         ADD COLUMN IF NOT EXISTS completed_at BIGINT;
 """
 
 

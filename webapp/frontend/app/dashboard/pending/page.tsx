@@ -42,6 +42,7 @@ interface PendingRow {
   submitted_to: string;
   submitted_by: string;
   created_by: string;
+  completed_at?: number | null;
 }
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -440,6 +441,23 @@ export default function PendingPage() {
   const rows = tab === "global" ? globalRows_ : tab === "mine" ? activeRows : completedMineRows;
   const isLoading = tab === "global" ? loadingGlobal : loadingMine;
 
+  const globalStats = useMemo(() => {
+    const today = new Date();
+    const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    let receivedToday = 0, overallPending = 0, completedToday = 0;
+    for (const r of globalRows) {
+      if (r.received_date === todayIso) receivedToday++;
+      if (r.status !== "completed") overallPending++;
+      if (r.completed_at) {
+        const d = new Date(r.completed_at);
+        if (d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()) {
+          completedToday++;
+        }
+      }
+    }
+    return { receivedToday, overallPending, completedToday };
+  }, [globalRows]);
+
   const pendingUserOptions = useMemo(
     () => users.map(u => ({ value: u.username, label: u.username })),
     [users],
@@ -769,6 +787,23 @@ export default function PendingPage() {
         <h1 className="text-3xl font-bold">Pending Sheet</h1>
         <Button onClick={openAdd}>+ Add Entry</Button>
       </div>
+
+      {tab === "global" && (
+        <div className="flex justify-end gap-2">
+          <div className="flex flex-col items-center px-3 py-1.5 rounded-md border bg-muted/30 min-w-[92px]">
+            <span className="text-lg font-bold leading-tight">{globalStats.receivedToday}</span>
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Received Today</span>
+          </div>
+          <div className="flex flex-col items-center px-3 py-1.5 rounded-md border bg-muted/30 min-w-[92px]">
+            <span className="text-lg font-bold leading-tight">{globalStats.overallPending}</span>
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Overall Pending</span>
+          </div>
+          <div className="flex flex-col items-center px-3 py-1.5 rounded-md border bg-muted/30 min-w-[92px]">
+            <span className="text-lg font-bold leading-tight">{globalStats.completedToday}</span>
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Completed Today</span>
+          </div>
+        </div>
+      )}
 
       {/* tabs */}
       <div className="flex items-center gap-1 border-b">

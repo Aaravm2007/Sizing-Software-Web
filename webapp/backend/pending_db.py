@@ -7,7 +7,7 @@ _MUTABLE = [
     "received_date", "received_time", "mail_for", "oem_dealer",
     "end_customer", "kva_rating", "quantity", "backup_time",
     "reply_to", "assigned_to", "status", "remarks", "priority", "inquiry_code",
-    "submission_date", "submitted_to", "submitted_by",
+    "submission_date", "submitted_to", "submitted_by", "completed_at",
 ]
 
 _ORDER = "ORDER BY CASE WHEN status='completed' THEN 1 ELSE 0 END ASC, inquiry_code ASC"

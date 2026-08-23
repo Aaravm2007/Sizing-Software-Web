@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -113,7 +114,9 @@ def set_status(row_id: int, body: StatusBody, user=Depends(get_current_user)):
         raise HTTPException(404, "Not found")
     if not _is_expert(user) and row.get("assigned_to") != user["username"]:
         raise HTTPException(403, "Not authorized to change this row's status")
-    update_row(row_id, {"status": body.status})
+    fields: dict = {"status": body.status}
+    fields["completed_at"] = int(time.time() * 1000) if body.status == "completed" else None
+    update_row(row_id, fields)
     return {"detail": "updated"}
 
 
@@ -157,7 +160,10 @@ def mark_complete(row_id: int, body: CompleteBody = CompleteBody(), user=Depends
         full_log_export(inquiry_code, user["username"], exp)
         pushed += 1
 
-    completion_fields: dict = {"status": "completed", "submitted_by": user["username"]}
+    completion_fields: dict = {
+        "status": "completed", "submitted_by": user["username"],
+        "completed_at": int(time.time() * 1000),
+    }
     if body.submission_date: completion_fields["submission_date"] = body.submission_date
     if body.submitted_to:    completion_fields["submitted_to"]    = body.submitted_to
     if body.reply_to:        completion_fields["reply_to"]        = body.reply_to
