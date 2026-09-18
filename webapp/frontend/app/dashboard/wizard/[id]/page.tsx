@@ -109,12 +109,11 @@ interface CostingRowLike {
   total_cost?: string | number;
 }
 
-// same logic as costing page's getCostValue — HVL -> est_sales_b, EFL -> total_cost*1.06
+// same logic as costing page's getCostValue — both HVL and EFL price off
+// est_sales_b (Tier 1 margin); EFL used to hardcode its own *1.06 instead
+// of reading the real, now-editable field.
 function getCostValue(row: CostingRowLike | undefined): number {
   if (!row) return 0;
-  const pc = String(row.partcode ?? "").toUpperCase();
-  if (pc.includes("HVL")) return Number(row.est_sales_b) || 0;
-  if (pc.includes("EFL")) return (Number(row.total_cost) || 0) * 1.06;
   return Number(row.est_sales_b) || 0;
 }
 
@@ -1231,13 +1230,13 @@ export default function WizardComparePage() {
                   ["Labour & Assembly",           "labour"],
                   ["Warranty & Service",          "warranty"],
                   ["Total Cost of Pack (A)",      "total_cost"],
-                  ["Margin @ 10%",                "margin_10"],
-                  ["Sales (B)",                   "est_sales_b"],
-                  ["Margin @ 15%",                "margin_15"],
-                  ["Sales (B+5%)",                "est_sales_b5"],
+                  ["Margin @ 6%",                 "margin_10"],
+                  ["Sales (A+6)",                 "est_sales_b"],
+                  ["Margin @ 10%",                "margin_15"],
+                  ["Sales (B)",                   "est_sales_b5"],
                   ["Per kW @ Cost (A)",           "per_kw_cost"],
-                  ["Per kW @ Sales (B)",          "per_kw_b"],
-                  ["Per kW @ Sales (B+5%)",       "per_kw_b5"],
+                  ["Per kW @ Sales (A+6)",        "per_kw_b"],
+                  ["Per kW @ Sales (B)",          "per_kw_b5"],
                   ["BMS/PCM",                     "bms_pcm"],
                   ["Cell Chemistry",              "cell_chemistry"],
                   ["Centre Tap",                  "centre_tap"],

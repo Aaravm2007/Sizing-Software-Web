@@ -115,9 +115,8 @@ const USER_VISIBLE_LABELS: [keyof CostingRow, string][] = [
 ];
 
 function getCostValue(row: CostingRow): number {
-  const pc = (row.partcode ?? "").toUpperCase();
-  if (pc.includes("HVL")) return Number(row.est_sales_b) || 0;
-  if (pc.includes("EFL")) return (Number(row.total_cost) || 0) * 1.06;
+  // HVL and EFL both price off the Tier 1 margin (est_sales_b); EFL used to
+  // hardcode its own *1.06 instead of reading the real, now-editable field.
   return Number(row.est_sales_b) || 0;
 }
 
@@ -165,13 +164,13 @@ const ROW_LABELS: [keyof CostingRow, string][] = [
   ["labour", "Production Labour & Assembly"],
   ["warranty", "Warranty & Service"],
   ["total_cost", "Total Cost of Pack (A)"],
-  ["margin_10", "Margin @10% on Cost"],
-  ["est_sales_b", "Estimated Sales Cost (B)"],
-  ["margin_15", "Margin @15% on Cost"],
-  ["est_sales_b5", "Estimated Sales Cost (B+5)"],
+  ["margin_10", "Margin @6% on Cost"],
+  ["est_sales_b", "Estimated Sales Cost (A+6)"],
+  ["margin_15", "Margin @10% on Cost"],
+  ["est_sales_b5", "Estimated Sales Cost (B)"],
   ["per_kw_cost", "Per kW Pricing @ Cost (A)"],
-  ["per_kw_profit1", "Per kW Pricing @ 1st Level (B)"],
-  ["per_kw_profit2", "Per kW Pricing @ 2nd Level (B+5)"],
+  ["per_kw_profit1", "Per kW Pricing @ 1st Level (A+6)"],
+  ["per_kw_profit2", "Per kW Pricing @ 2nd Level (B)"],
   ["bms_pcm_type", "BMS/PCM"],
   ["cell_chemistry", "LFP/NCM"],
   ["centre_tap", "Centre Tap"],

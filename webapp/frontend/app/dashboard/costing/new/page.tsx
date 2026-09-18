@@ -101,7 +101,7 @@ const EMPTY: FormState = {
 function n(v: string) { return parseFloat(v) || 0; }
 function fmt(v: number) { return isNaN(v) || !isFinite(v) ? "" : String(Math.round(v * 100) / 100); }
 
-function recalc(f: FormState, locked: Set<string> = new Set(), cellPct = 7.5, bmsPct = 18): Partial<FormState> {
+function recalc(f: FormState, locked: Set<string> = new Set(), cellPct = 7.5, bmsPct = 18, margin1Pct = 6, margin2Pct = 10): Partial<FormState> {
   const updates: Partial<FormState> = {};
 
   // kw = (V * Ah) / 1000
@@ -169,8 +169,8 @@ function recalc(f: FormState, locked: Set<string> = new Set(), cellPct = 7.5, bm
   const totalCost = locked.has("total_cost") ? n(f.total_cost) : landing + warranty + labour;
   if (!locked.has("total_cost")) updates.total_cost = fmt(totalCost);
 
-  const margin10 = totalCost * 0.1;
-  const margin15 = totalCost * 0.15;
+  const margin10 = totalCost * (margin1Pct / 100);
+  const margin15 = totalCost * (margin2Pct / 100);
   updates.margin_10 = fmt(margin10);
   updates.margin_15 = fmt(margin15);
   updates.est_sales_b = fmt(totalCost + margin10);
@@ -252,6 +252,8 @@ function NewCostingInner() {
   });
   const cellPct = costingPresets.find((r) => r.key === "cell_clearing_customs_pct")?.value ?? 7.5;
   const bmsPct = costingPresets.find((r) => r.key === "bms_clearing_customs_pct")?.value ?? 18;
+  const margin1Pct = costingPresets.find((r) => r.key === "margin_tier1_pct")?.value ?? 6;
+  const margin2Pct = costingPresets.find((r) => r.key === "margin_tier2_pct")?.value ?? 10;
 
   const { data: existingRows = [] } = useQuery<any[]>({
     queryKey: ["costing-tree"],
@@ -341,7 +343,7 @@ function NewCostingInner() {
   const update = (k: keyof FormState, v: string) => {
     setForm((f) => {
       const next = { ...f, [k]: v };
-      return { ...next, ...recalc(next, locked, cellPct, bmsPct) };
+      return { ...next, ...recalc(next, locked, cellPct, bmsPct, margin1Pct, margin2Pct) };
     });
   };
 
@@ -351,7 +353,7 @@ function NewCostingInner() {
     setLocked(newLocked);
     setForm((f) => {
       const next = { ...f, [k]: v };
-      return { ...next, ...recalc(next, newLocked, cellPct, bmsPct) };
+      return { ...next, ...recalc(next, newLocked, cellPct, bmsPct, margin1Pct, margin2Pct) };
     });
   };
 
@@ -363,13 +365,13 @@ function NewCostingInner() {
         next.voltage = parts[0];
         next.ampere_capacity = parts[1];
       }
-      return { ...next, ...recalc(next, locked, cellPct, bmsPct) };
+      return { ...next, ...recalc(next, locked, cellPct, bmsPct, margin1Pct, margin2Pct) };
     });
   };
 
   const saveMut = useMutation({
     mutationFn: () => {
-      const calc = recalc(form, locked, cellPct, bmsPct);
+      const calc = recalc(form, locked, cellPct, bmsPct, margin1Pct, margin2Pct);
       const merged = { ...form, ...calc };
       const payload = {
         dollar_rate: merged.dollar_rate,
@@ -590,16 +592,16 @@ function NewCostingInner() {
             <Row label="Total Cost of Pack (A)">
               <Input type="number" value={form.total_cost} onChange={e => updateManual("total_cost", e.target.value)} className={locked.has("total_cost") ? "border-amber-400" : ""} placeholder="auto" />
             </Row>
-            <Row label="Margin @10% on Cost"><ReadonlyMoney value={form.margin_10} /></Row>
-            <Row label="Estimated Sales Cost (B)"><ReadonlyMoney value={form.est_sales_b} /></Row>
-            <Row label="Margin @15% on Cost"><ReadonlyMoney value={form.margin_15} /></Row>
-            <Row label="Estimated Sales Cost (B+5)"><ReadonlyMoney value={form.est_sales_b5} /></Row>
+            <Row label="Margin @6% on Cost"><ReadonlyMoney value={form.margin_10} /></Row>
+            <Row label="Estimated Sales Cost (A+6)"><ReadonlyMoney value={form.est_sales_b} /></Row>
+            <Row label="Margin @10% on Cost"><ReadonlyMoney value={form.margin_15} /></Row>
+            <Row label="Estimated Sales Cost (B)"><ReadonlyMoney value={form.est_sales_b5} /></Row>
           </Section>
 
           <Section title="Per kW Pricing">
             <Row label="Per kW @ Cost (A)"><ReadonlyMoney value={form.per_kw_cost} /></Row>
-            <Row label="Per kW @ 1st Level (B)"><ReadonlyMoney value={form.per_kw_profit1} /></Row>
-            <Row label="Per kW @ 2nd Level (B+5)"><ReadonlyMoney value={form.per_kw_profit2} /></Row>
+            <Row label="Per kW @ 1st Level (A+6)"><ReadonlyMoney value={form.per_kw_profit1} /></Row>
+            <Row label="Per kW @ 2nd Level (B)"><ReadonlyMoney value={form.per_kw_profit2} /></Row>
           </Section>
 
           <Section title="Additional Options">

@@ -569,6 +569,8 @@ INSERT INTO quote_rates VALUES ('subscription', 1500.0, 'Subscription Charges (p
 
 INSERT INTO costing_presets VALUES ('cell_clearing_customs_pct', 7.5, 'Cell Clearing & Customs %') ON CONFLICT DO NOTHING;
 INSERT INTO costing_presets VALUES ('bms_clearing_customs_pct', 18.0, 'BMS/PCM Clearing & Customs %') ON CONFLICT DO NOTHING;
+INSERT INTO costing_presets VALUES ('margin_tier1_pct', 6.0, 'Margin Tier 1 % (Estimated Sales Cost A+6)') ON CONFLICT DO NOTHING;
+INSERT INTO costing_presets VALUES ('margin_tier2_pct', 10.0, 'Margin Tier 2 % (Estimated Sales Cost B)') ON CONFLICT DO NOTHING;
 
 INSERT INTO modular_rack_rates VALUES ('W=600*D=1000*H=880',  30000.0) ON CONFLICT DO NOTHING;
 INSERT INTO modular_rack_rates VALUES ('W=600*D=1000*H=1392', 40000.0) ON CONFLICT DO NOTHING;
