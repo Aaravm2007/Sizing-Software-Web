@@ -19,6 +19,7 @@ FOLDERS = {
     "gads": APP_DIR / "Gads",
     "cell_certificates": APP_DIR / "Cell Certificates",
     "battery_compliance": APP_DIR / "Battery Compliance",
+    "battery_certificates": APP_DIR / "Battery Certificates",
 }
 
 ARCHIVE_FOLDERS = {
@@ -26,6 +27,7 @@ ARCHIVE_FOLDERS = {
     "gads": APP_DIR / "archived_gad",
     "cell_certificates": APP_DIR / "archived_cell_certificates",
     "battery_compliance": APP_DIR / "archived_battery_compliance",
+    "battery_certificates": APP_DIR / "archived_battery_certificates",
 }
 
 

@@ -7,15 +7,18 @@ import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home, BarChart2, DollarSign, FileText, BookOpen,
-  Layout, LogOut, FlaskConical, Sun, Moon, ClipboardCheck, ShieldCheck, Wand2, ClipboardList, Clock, PackageCheck, Table2, FileBadge2, BadgeCheck,
+  Layout, LogOut, FlaskConical, Sun, Moon, ClipboardCheck, ShieldCheck, Wand2, ClipboardList, Clock, PackageCheck, Table2, FileBadge2, BadgeCheck, Factory, FileCheck2,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { isAuthenticated, getUsername, api } from "@/lib/api";
 import { logout } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-const NAV_SECTIONS = [
+interface NavItem { label: string; href: string; icon: LucideIcon; expertOnly: boolean; guestHidden: boolean }
+
+const NAV_SECTIONS: { section: string | null; items: NavItem[] }[] = [
   {
     section: null,
     items: [
@@ -32,6 +35,7 @@ const NAV_SECTIONS = [
       { label: "GAD",       href: "/dashboard/gad",       icon: Layout,     expertOnly: false, guestHidden: false },
       { label: "Cell Certificates", href: "/dashboard/cell-certificates", icon: FileBadge2, expertOnly: false, guestHidden: false },
       { label: "Battery Compliance", href: "/dashboard/battery-compliance", icon: BadgeCheck, expertOnly: false, guestHidden: false },
+      { label: "Battery Certificates", href: "/dashboard/battery-certificates", icon: FileCheck2, expertOnly: false, guestHidden: false },
       { label: "Wizard",    href: "/dashboard/wizard",    icon: Wand2,      expertOnly: false, guestHidden: true },
       { label: "Mass Sizing", href: "/dashboard/mass-sizing", icon: Table2, expertOnly: true, guestHidden: false },
     ],
@@ -50,6 +54,7 @@ const NAV_SECTIONS = [
     items: [
       { label: "Masters", href: "/dashboard/formulas", icon: FlaskConical, expertOnly: true, guestHidden: false },
       { label: "Admin",   href: "/dashboard/admin",   icon: ShieldCheck,  expertOnly: true, guestHidden: false },
+      { label: "OEMs",    href: "/dashboard/oems",    icon: Factory,      expertOnly: true, guestHidden: false },
     ],
   },
 ];

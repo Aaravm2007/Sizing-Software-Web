@@ -16,7 +16,7 @@ import { GLOBAL_KEY, type FilterValues } from "@/lib/use-table-filter";
 
 // ── column definitions ────────────────────────────────────────────────────────
 
-type YNField = "centre_tap" | "datasheet" | "sizing_sheet" | "gad" | "cell_certificate" | "battery_compliance";
+type YNField = "centre_tap" | "datasheet" | "sizing_sheet" | "gad" | "cell_certificate" | "battery_compliance" | "battery_certificate";
 
 interface Col {
   key: string;
@@ -80,6 +80,7 @@ const COLS: Col[] = [
   { key: "gad",               label: "GAD",                width: 60,  type: "yn"     },
   { key: "cell_certificate",  label: "Cell Cert.",         width: 85,  type: "yn"     },
   { key: "battery_compliance",label: "Bat. Compliance",    width: 115, type: "yn"     },
+  { key: "battery_certificate",label: "Bat. Certificate",  width: 115, type: "yn"     },
   { key: "warranty",          label: "Warranty (yrs)",     width: 100, type: "text"   },
   { key: "dollar_rate",       label: "Dollar Rate",        width: 100, type: "text"   },
   { key: "remarks",           label: "Remarks",            width: 210, type: "text"   },
@@ -123,7 +124,7 @@ const QUOTATION_KEYS = new Set([
   "cc4_desc","cc4_price","cc5_desc","cc5_price",
 ]);
 const OTHER_KEYS = new Set([
-  "datasheet","sizing_sheet","gad","cell_certificate","battery_compliance","warranty","dollar_rate",
+  "datasheet","sizing_sheet","gad","cell_certificate","battery_compliance","battery_certificate","warranty","dollar_rate",
 ]);
 
 // ── inquiry code row colours ──────────────────────────────────────────────────

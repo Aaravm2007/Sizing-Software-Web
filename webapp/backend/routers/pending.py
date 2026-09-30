@@ -253,6 +253,7 @@ class ExportEntry(BaseModel):
     gad_name: str = ""
     cell_certificate_name: str = ""
     battery_compliance_name: str = ""
+    battery_certificate_name: str = ""
     remarks: str = ""
     sol_no: str = ""
     type: str = ""

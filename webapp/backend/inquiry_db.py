@@ -25,7 +25,7 @@ _COLS = [
     "cc3_desc", "cc3_price",
     "cc4_desc", "cc4_price",
     "cc5_desc", "cc5_price",
-    "datasheet", "sizing_sheet", "gad", "cell_certificate", "battery_compliance", "warranty",
+    "datasheet", "sizing_sheet", "gad", "cell_certificate", "battery_compliance", "battery_certificate", "warranty",
     "remarks", "handled_by",
     "submission_date", "submitted_to", "submitted_by", "created_at", "quote_code", "sol_no",
     "dollar_rate", "base_partcode", "quote_format",
@@ -373,6 +373,7 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
     gad_exports    = [e for e in exports if e.get("export_type") == "gad"]
     cc_exports     = [e for e in exports if e.get("export_type") == "cell_certificate"]
     bc_exports     = [e for e in exports if e.get("export_type") == "battery_compliance"]
+    bc2_exports    = [e for e in exports if e.get("export_type") == "battery_certificate"]
 
     sol_nos = list(dict.fromkeys(
         e.get("sol_no", "") for e in quote_exports if e.get("sol_no", "")
@@ -438,6 +439,7 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
             gad_flag = "YES" if any(e.get("sol_no") == sol_no for e in gad_exports) else "NO"
             cc_flag  = "YES" if any(e.get("sol_no") == sol_no for e in cc_exports)  else "NO"
             bc_flag  = "YES" if any(e.get("sol_no") == sol_no for e in bc_exports)  else "NO"
+            bc2_flag = "YES" if any(e.get("sol_no") == sol_no for e in bc2_exports) else "NO"
 
             base_type = str(latest_q.get("type", "") or "")
             row_data = {
@@ -445,7 +447,7 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
                 "sol_no": sol_no,
                 "type": f"{base_type} - Sol {sol_no}" if base_type else f"Sol {sol_no}",
                 "datasheet": ds_flag, "gad": gad_flag, "cell_certificate": cc_flag,
-                "battery_compliance": bc_flag, "sizing_sheet": sz_flag,
+                "battery_compliance": bc_flag, "battery_certificate": bc2_flag, "sizing_sheet": sz_flag,
             }
 
             cur.execute(
@@ -498,6 +500,14 @@ def create_from_completion(inquiry_code: str, exports: list, pending_row: dict):
             fname = str(e.get("battery_compliance_name", "") or "").strip()
             if fname:
                 _insert(cur, {**_pending_base, "type": "Battery Compliance", "part_code": fname})
+
+        # ── unlinked / standalone battery certificates → own row ──
+        for e in bc2_exports:
+            if not _is_standalone(e):
+                continue
+            fname = str(e.get("battery_certificate_name", "") or "").strip()
+            if fname:
+                _insert(cur, {**_pending_base, "type": "Battery Certificate", "part_code": fname})
 
         # ── unlinked / standalone sizing → one row per unique fingerprint ──
         def _sz_fp(e):

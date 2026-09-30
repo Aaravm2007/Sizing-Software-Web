@@ -7,11 +7,14 @@ from fastapi import HTTPException
 # out of the path tail. No files or directories are created.
 
 _APP_DIR = Path(__file__).parent.parent.parent  # project root
-_SAFE_USERNAME = re.compile(r'^[a-zA-Z0-9_-]+$')
+# Letters/digits/_/-/@/. covers plain usernames and email-style ones
+# (e.g. "Guest@123"); "/" and "\" stay excluded since this becomes a folder
+# name directly, and ".." is blocked separately to stop path traversal.
+_SAFE_USERNAME = re.compile(r'^[a-zA-Z0-9_@.-]+$')
 
 
 def _sanitize_username(username: str) -> str:
-    if not username or not _SAFE_USERNAME.match(username):
+    if not username or ".." in username or not _SAFE_USERNAME.match(username):
         raise HTTPException(status_code=400, detail="Invalid username")
     return username
 

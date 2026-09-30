@@ -293,6 +293,8 @@ def create_quote(body: QuoteCreate, user=Depends(get_current_user), scope: str =
     fname = TEMPLATE_MAP.get(body.format_name, "Quote_format_High_Vtg.docx")
     try:
         add_new_quote(body.code, body.date, body.customer_name, body.solution_provider, fname, tdb, body.sales_person, body.dollar_rate, str(body.warranty_years))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"code": body.code}
@@ -383,6 +385,8 @@ def remove_quote(code: str, user=Depends(get_current_user), scope: str = Query("
     tdb = _tdb(user["username"], scope)
     try:
         delete_quote(code, tdb)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     try:
@@ -411,6 +415,8 @@ def add_item(code: str, body: QuoteItem, user=Depends(get_current_user)):
             body.centre_tapping, body.batterypartcode, body.backup_time,
             body.quantity, body.quote_price, body.modular_rack, db_path=tdb,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "added"}
@@ -520,6 +526,8 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
             _cur.execute("SELECT data FROM costing_tree WHERE username = %s ORDER BY id",
                          (user["username"],))
             rows = [r[0] for r in _cur.fetchall()]
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Costing DB error: {e}")
 
@@ -603,7 +611,7 @@ def add_from_costing(code: str, body: AddFromCostingReq, user=Depends(get_curren
                     "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
                     "custom_cost_desc": "", "custom_cost_price": "",
                     "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO", "cell_certificate": "NO",
-                    "battery_compliance": "NO", "warranty": "5",
+                    "battery_compliance": "NO", "battery_certificate": "NO", "warranty": "5",
                     "remarks": "", "submission_date": "", "submitted_to": "",
                     "quote_code": code, "sol_no": str(sol_no),
                 })
@@ -740,7 +748,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                     "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
                     "custom_cost_desc": "", "custom_cost_price": "",
                     "datasheet": "NO", "sizing_sheet": "YES", "gad": "NO", "cell_certificate": "NO",
-                    "battery_compliance": "NO",
+                    "battery_compliance": "NO", "battery_certificate": "NO",
                     "warranty": str(q_warranty_years),
                     "dollar_rate": q_dollar_rate,
                     "base_partcode": _base_partcode,
@@ -794,7 +802,7 @@ def add_from_wizard(code: str, body: AddFromWizardReq, user=Depends(get_current_
                 "rack_dim": "", "qty": "", "per_rack_price": "", "price": "",
                 "custom_cost_desc": "", "custom_cost_price": "",
                 "datasheet": "NO", "sizing_sheet": "NO", "gad": "NO", "cell_certificate": "NO",
-                "battery_compliance": "NO",
+                "battery_compliance": "NO", "battery_certificate": "NO",
                 "warranty": str(q_warranty_years),
                 "dollar_rate": q_dollar_rate,
                 "base_partcode": _base_partcode,
@@ -879,6 +887,8 @@ def firebase_list(_=Depends(get_current_user)):
     try:
         from basefunctions import fetch_quote_info
         return fetch_quote_info()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -888,6 +898,8 @@ def save_to_firebase(code: str, user=Depends(get_current_user)):
     try:
         from basefunctions import save_quote
         save_quote(target_code=code, username=user["username"])
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "saved"}
@@ -898,6 +910,8 @@ def download_from_firebase(code: str, user=Depends(get_current_user)):
     try:
         from basefunctions import download_quote_from_firebase
         data = download_quote_from_firebase(code)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     if not data:
@@ -962,6 +976,8 @@ def update_item(code: str, sr_no: int, body: UpdateItemReq, user=Depends(get_cur
         return {"detail": "nothing to update"}
     try:
         update_item_fields(code, sr_no, fields, db_path=tdb)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "updated"}
@@ -973,6 +989,8 @@ def revert_item_discount(code: str, sr_no: int, user=Depends(get_current_user), 
     tdb = _tdb(user["username"], scope)
     try:
         revert_discount(code, sr_no, db_path=tdb)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "reverted"}
@@ -989,6 +1007,8 @@ def reorder_items(code: str, body: ReorderReq, user=Depends(get_current_user), s
     tdb = _tdb(user["username"], scope)
     try:
         reorder_quote_items(code, body.sr_nos, db_path=tdb)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     try:
@@ -1020,6 +1040,8 @@ def export_word(code: str, scope: str = Query("regular"), user=Depends(get_curre
     tdb = _tdb(user["username"], scope)
     try:
         path = _generate_docx(code, tdb)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -1059,6 +1081,8 @@ def export_pdf(code: str, scope: str = Query("regular"), user=Depends(get_curren
         os.unlink(docx_path)
     except ImportError:
         raise HTTPException(501, "PDF export requires Microsoft Word installed on the server")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     # DISABLED: inquiry auto-sync replaced by pending export history
@@ -1124,6 +1148,8 @@ def restore_quote(body: RestoreQuoteReq, user=Depends(get_current_user)):
                 item.centre_tapping, item.batterypartcode, item.backup_time,
                 item.quantity, item.quote_price, item.modular_rack, db_path=tdb,
             )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"code": code}

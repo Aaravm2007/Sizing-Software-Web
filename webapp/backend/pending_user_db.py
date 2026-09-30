@@ -34,7 +34,7 @@ _ITEM_COLS = [
     "cc5_desc", "cc5_price",
     "submission_date", "submitted_to",
     # datasheet / gad
-    "datasheet_name", "gad_name", "cell_certificate_name", "battery_compliance_name",
+    "datasheet_name", "gad_name", "cell_certificate_name", "battery_compliance_name", "battery_certificate_name",
     # misc
     "remarks",
     # system attribution
@@ -153,9 +153,10 @@ _BUCKET = {
     "gad": "GAD",
     "cell_certificate": "Cell Certificate",
     "battery_compliance": "Battery Compliance",
+    "battery_certificate": "Battery Certificate",
 }
 
-_LABEL_ORDER = ["Quote", "Sizing", "Datasheet", "GAD", "Cell Certificate", "Battery Compliance"]
+_LABEL_ORDER = ["Quote", "Sizing", "Datasheet", "GAD", "Cell Certificate", "Battery Compliance", "Battery Certificate"]
 
 
 def export_summary_all(db_path: str) -> dict:

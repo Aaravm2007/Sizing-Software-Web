@@ -85,6 +85,7 @@ const EXPORT_CHIP: Record<string, string> = {
   GAD:       "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200",
   "Cell Certificate": "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-200",
   "Battery Compliance": "bg-lime-100 text-lime-800 dark:bg-lime-900/40 dark:text-lime-200",
+  "Battery Certificate": "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200",
 };
 
 type PendingFilterType = "text" | "select" | "date" | "time";
@@ -126,8 +127,8 @@ function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
 
 // ── MailForPicker ─────────────────────────────────────────────────────────────
 
-const MAIL_FOR_OPTIONS = ["Datasheet", "GAD", "Cell Certificate", "Battery Compliance", "Quote", "Sizing"];
-const MAIL_FOR_ORDER = ["Quote", "Sizing", "Datasheet", "GAD", "Cell Certificate", "Battery Compliance"];
+const MAIL_FOR_OPTIONS = ["Datasheet", "GAD", "Cell Certificate", "Battery Compliance", "Battery Certificate", "Quote", "Sizing"];
+const MAIL_FOR_ORDER = ["Quote", "Sizing", "Datasheet", "GAD", "Cell Certificate", "Battery Compliance", "Battery Certificate"];
 const byChipOrder = (a: string, b: string) => MAIL_FOR_ORDER.indexOf(a) - MAIL_FOR_ORDER.indexOf(b);
 
 function MailForPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -349,6 +350,9 @@ export default function PendingPage() {
       } else if (type === "battery_compliance") {
         const res = await api.get(`/api/datafiles/battery_compliance/files/${encodeURIComponent(e.battery_compliance_name)}`, { responseType: "blob" });
         _triggerDownload(res.data, e.battery_compliance_name);
+      } else if (type === "battery_certificate") {
+        const res = await api.get(`/api/datafiles/battery_certificates/files/${encodeURIComponent(e.battery_certificate_name)}`, { responseType: "blob" });
+        _triggerDownload(res.data, e.battery_certificate_name);
       } else if (type === "quote_word" || type === "quote_pdf") {
         const fmt = type === "quote_word" ? "word" : "pdf";
         const ext = fmt === "word" ? "docx" : "pdf";
@@ -640,7 +644,7 @@ export default function PendingPage() {
       }
 
       const unlinked = exports.filter(e =>
-        (e.export_type === "datasheet" || e.export_type === "gad" || e.export_type === "cell_certificate" || e.export_type === "battery_compliance") && !e.sol_no
+        (e.export_type === "datasheet" || e.export_type === "gad" || e.export_type === "cell_certificate" || e.export_type === "battery_compliance" || e.export_type === "battery_certificate") && !e.sol_no
       );
 
       if (sizingGroups.length > 0 || unlinked.length > 0) {
@@ -1354,8 +1358,8 @@ export default function PendingPage() {
           ) : detailExports.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-6">No exports recorded for this item yet.</p>
           ) : (() => {
-            const TYPE_LABEL: Record<string, string> = { quote_word: "Quote (Word)", quote_pdf: "Quote (PDF)", sizing_excel: "Sizing (Excel)", sizing_pdf: "Sizing (PDF)", datasheet: "Datasheet", gad: "GAD", cell_certificate: "Cell Certificate", battery_compliance: "Battery Compliance" };
-            const CHIP_KEY: Record<string, string> = { quote_word: "Quote", quote_pdf: "Quote", sizing_excel: "Sizing", sizing_pdf: "Sizing", datasheet: "Datasheet", gad: "GAD", cell_certificate: "Cell Certificate", battery_compliance: "Battery Compliance" };
+            const TYPE_LABEL: Record<string, string> = { quote_word: "Quote (Word)", quote_pdf: "Quote (PDF)", sizing_excel: "Sizing (Excel)", sizing_pdf: "Sizing (PDF)", datasheet: "Datasheet", gad: "GAD", cell_certificate: "Cell Certificate", battery_compliance: "Battery Compliance", battery_certificate: "Battery Certificate" };
+            const CHIP_KEY: Record<string, string> = { quote_word: "Quote", quote_pdf: "Quote", sizing_excel: "Sizing", sizing_pdf: "Sizing", datasheet: "Datasheet", gad: "GAD", cell_certificate: "Cell Certificate", battery_compliance: "Battery Compliance", battery_certificate: "Battery Certificate" };
             const DATA_COLS: { key: string; label: string }[] = [
               { key: "quote_code",          label: "Quote Code"     },
               { key: "exported_by",         label: "By"             },
@@ -1407,6 +1411,7 @@ export default function PendingPage() {
               { key: "gad_name",            label: "GAD"            },
               { key: "cell_certificate_name", label: "Cell Certificate" },
               { key: "battery_compliance_name", label: "Battery Compliance" },
+              { key: "battery_certificate_name", label: "Battery Certificate" },
               { key: "remarks",             label: "Remarks"        },
             ];
             // hide exported_by for per-user source; show all other cols always
@@ -1415,7 +1420,7 @@ export default function PendingPage() {
               return true;
             });
             // ── build tree ──
-            const TYPE_ORDER: Record<string, number> = { quote_word: 0, quote_pdf: 0, sizing_excel: 1, sizing_pdf: 1, datasheet: 2, gad: 3, cell_certificate: 4, battery_compliance: 5 };
+            const TYPE_ORDER: Record<string, number> = { quote_word: 0, quote_pdf: 0, sizing_excel: 1, sizing_pdf: 1, datasheet: 2, gad: 3, cell_certificate: 4, battery_compliance: 5, battery_certificate: 6 };
             const byTypeOrder = (a: any, b: any) => (TYPE_ORDER[a.export_type] ?? 9) - (TYPE_ORDER[b.export_type] ?? 9);
             const solSort = (a: any, b: any) => {
               const aCode = String(a.quote_code || ""), bCode = String(b.quote_code || "");
@@ -1711,10 +1716,11 @@ export default function PendingPage() {
                             {exp.export_type === "datasheet" ? (exp.datasheet_name || "Datasheet")
                               : exp.export_type === "gad" ? (exp.gad_name || "GAD")
                               : exp.export_type === "cell_certificate" ? (exp.cell_certificate_name || "Cell Certificate")
-                              : (exp.battery_compliance_name || "Battery Compliance")}
+                              : exp.export_type === "battery_compliance" ? (exp.battery_compliance_name || "Battery Compliance")
+                              : (exp.battery_certificate_name || "Battery Certificate")}
                           </span>
                           <span className="text-[10px] text-muted-foreground">
-                            {exp.export_type === "datasheet" ? "Datasheet" : exp.export_type === "gad" ? "GAD" : exp.export_type === "cell_certificate" ? "Cell Certificate" : "Battery Compliance"}
+                            {exp.export_type === "datasheet" ? "Datasheet" : exp.export_type === "gad" ? "GAD" : exp.export_type === "cell_certificate" ? "Cell Certificate" : exp.export_type === "battery_compliance" ? "Battery Compliance" : "Battery Certificate"}
                           </span>
                         </div>
                         <select

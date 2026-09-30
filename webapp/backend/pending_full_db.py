@@ -19,7 +19,7 @@ _DATA_COLS = [
     "cc4_desc", "cc4_price",
     "cc5_desc", "cc5_price",
     "submission_date", "submitted_to",
-    "datasheet_name", "gad_name", "cell_certificate_name", "battery_compliance_name", "remarks", "sol_no", "type",
+    "datasheet_name", "gad_name", "cell_certificate_name", "battery_compliance_name", "battery_certificate_name", "remarks", "sol_no", "type",
     "dollar_rate", "warranty_years", "quote_format", "base_partcode",
 ]
 
@@ -83,8 +83,9 @@ _BUCKET = {
     "gad": "GAD",
     "cell_certificate": "Cell Certificate",
     "battery_compliance": "Battery Compliance",
+    "battery_certificate": "Battery Certificate",
 }
-_LABEL_ORDER = ["Quote", "Sizing", "Datasheet", "GAD", "Cell Certificate", "Battery Compliance"]
+_LABEL_ORDER = ["Quote", "Sizing", "Datasheet", "GAD", "Cell Certificate", "Battery Compliance", "Battery Certificate"]
 
 
 def export_summary_global() -> dict:

@@ -391,6 +391,8 @@ def get_durations(_=Depends(get_current_user)):
         sys.path.insert(0, str(APP_DIR))
         from basefunctions import get_all_durations
         return get_all_durations()
+    except HTTPException:
+        raise
     except Exception as e:
         return []
 
@@ -409,6 +411,8 @@ def search_add(body: SearchRequest, user=Depends(get_current_user)):
         sys.path.insert(0, str(APP_DIR))
         from basefunctions import search_data_by_keyword
         products = search_data_by_keyword(body.duration, "Battery Pack", body.keyword)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Database error: {e}")
 
@@ -593,6 +597,8 @@ def save_to_firebase(row_index: int, user=Depends(get_expert_user)):
             "active": True,
         }
         save_product_to_firebase(product)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "saved to Firebase"}
@@ -618,6 +624,8 @@ def deactivate_in_firebase(row_index: int, user=Depends(get_expert_user)):
     try:
         import pgfire
         all_products = pgfire.get("products", duration)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Database error: {e}")
 
@@ -681,6 +689,8 @@ def deactivate_in_firebase(row_index: int, user=Depends(get_expert_user)):
     target_pid = candidates[0][0]
     try:
         pgfire.update("products", f"{duration}/{target_pid}", {"active": False})
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Database update failed: {e}")
 
@@ -799,6 +809,8 @@ def preview_costing(body: PreviewRequest, user=Depends(get_current_user)):
         from basefunctions import get_all_durations
         import pgfire
         durations = get_all_durations()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(503, f"Database error: {e}")
 
@@ -877,6 +889,8 @@ def preview_costing_range(body: PreviewRangeRequest, user=Depends(get_current_us
         from basefunctions import get_all_durations
         import pgfire
         durations = get_all_durations()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(503, f"Database error: {e}")
 
@@ -961,6 +975,8 @@ def find_costing(body: FindCostingReq, _=Depends(get_current_user)):
         from basefunctions import get_all_durations
         import pgfire
         durations = get_all_durations()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(503, f"Database error: {e}")
 
@@ -1083,6 +1099,8 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_admin_user)):
         from basefunctions import get_all_durations
         import pgfire
         durations = get_all_durations()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(503, f"Database error: {e}")
 
@@ -1104,8 +1122,12 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_admin_user)):
                     changes = _apply_mass_update(product, body.field, multiplier)
                     pgfire.update("products", f"{duration}/{pid}", changes)
                     updated_count += 1
+                except HTTPException:
+                    raise
                 except Exception as e:
                     errors.append(f"{duration}/{pid}: {e}")
+        except HTTPException:
+            raise
         except Exception as e:
             errors.append(f"{duration}: {e}")
 
@@ -1131,6 +1153,8 @@ def mass_update_preview(_=Depends(get_current_user)):
             count = len(products) if isinstance(products, dict) else (len(products) if isinstance(products, list) else 0)
             result.append({"duration": d, "count": count})
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(503, str(e))
 

@@ -187,6 +187,8 @@ def create_project(body: ProjectCreate, user=Depends(get_current_user)):
         raise HTTPException(400, "Project name required")
     try:
         init_sizing_db(body.name.strip(), db_path=get_user_sizing_db(user["username"]))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"name": body.name.strip()}
@@ -196,6 +198,8 @@ def create_project(body: ProjectCreate, user=Depends(get_current_user)):
 def remove_project(name: str, user=Depends(get_current_user)):
     try:
         delete_project(name, db_path=get_user_sizing_db(user["username"]))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"detail": "deleted"}
@@ -444,6 +448,8 @@ def export_excel(name: str, sr_no: Optional[int] = None, sr_nos: Optional[str] =
     sr_no_list = _parse_sr_nos(sr_nos)
     try:
         path = _build_excel(name, sr_no, db_path=sdb, sr_nos=sr_no_list)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -791,6 +797,8 @@ def _xlsx_to_pdf(xlsx_path: str) -> str:
 def export_wizard(body: WizardExportBody, _=Depends(get_current_user)):
     try:
         xlsx_path = _build_wizard_excel(body)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     fname = f"{body.project_name or 'wizard'}_sizing.xlsx"
@@ -805,6 +813,8 @@ def export_wizard_pdf(body: WizardExportBody, _=Depends(get_current_user)):
         pdf_path  = _xlsx_to_pdf(xlsx_path)
     except ImportError:
         raise HTTPException(501, "PDF export requires Microsoft Excel installed on the server")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     fname = f"{body.project_name or 'wizard'}_sizing.pdf"
@@ -817,6 +827,8 @@ def export_project(body: ProjectExportBody, user=Depends(get_current_user)):
         raise HTTPException(400, "No sizings to export")
     try:
         xlsx_path = _build_project_excel(body)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -886,6 +898,8 @@ def get_project_quote(code: str, user=Depends(get_current_user)):
     try:
         import pgfire
         entry = pgfire.get("project_quotes", code)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(503, f"Database error: {e}")
     if not entry or not isinstance(entry, dict):
@@ -904,6 +918,8 @@ def export_pdf(name: str, sr_no: Optional[int] = None, sr_nos: Optional[str] = N
         pdf_path  = _xlsx_to_pdf(xlsx_path)
     except ImportError:
         raise HTTPException(501, "PDF export requires Microsoft Excel installed on the server")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
     suffix = "_selected" if sr_no_list else (f"_{sr_no}" if sr_no else "_all")

@@ -523,6 +523,62 @@ CREATE TABLE IF NOT EXISTS sizing_projects (
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(username, project_name)
 );
+
+CREATE TABLE IF NOT EXISTS oems (
+    id         SERIAL PRIMARY KEY,
+    name       TEXT UNIQUE NOT NULL,
+    created_at BIGINT
+);
+
+CREATE TABLE IF NOT EXISTS oem_sheets (
+    id         SERIAL PRIMARY KEY,
+    oem_id     INTEGER NOT NULL REFERENCES oems(id) ON DELETE CASCADE,
+    label      TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_oem_sheets_oem ON oem_sheets(oem_id);
+
+CREATE TABLE IF NOT EXISTS oem_products (
+    id                          SERIAL PRIMARY KEY,
+    sheet_id                    INTEGER NOT NULL REFERENCES oem_sheets(id) ON DELETE CASCADE,
+    sort_order                  INTEGER NOT NULL DEFAULT 0,
+    -- parameters
+    ups_model                   TEXT DEFAULT '',
+    nominal_dc_voltage          REAL,
+    backup_requirement_min      REAL,
+    chemistry                   TEXT DEFAULT '',
+    centre_tap                  TEXT DEFAULT '',
+    cell_type                   TEXT DEFAULT '',
+    ups_rating_kva              REAL,
+    power_factor                REAL,
+    inverter_efficiency         REAL,
+    end_cell_voltage            REAL,
+    max_charging_voltage        REAL,
+    -- solution (computed / editable)
+    calculated_load_kw          REAL,
+    energy_required_kwh         REAL,
+    capacity_required_ah        REAL,
+    nearest_capacity_ah         REAL,
+    total_available_energy_kwh  REAL,
+    kwh_approx                  REAL,
+    ah_approx                   REAL,
+    backup_min_bol              REAL,
+    configuration                TEXT DEFAULT '',
+    price_with_cabinet_bms       REAL,
+    costing_tree_id              INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_oem_products_sheet ON oem_products(sheet_id);
+
+CREATE TABLE IF NOT EXISTS oem_product_extras (
+    id          SERIAL PRIMARY KEY,
+    product_id  INTEGER NOT NULL REFERENCES oem_products(id) ON DELETE CASCADE,
+    item_type   TEXT NOT NULL,  -- 'rack' | 'custom'
+    description TEXT DEFAULT '',
+    quantity    INTEGER NOT NULL DEFAULT 1,
+    price       REAL NOT NULL DEFAULT 0,
+    sort_order  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_oem_product_extras_product ON oem_product_extras(product_id);
 """
 
 _SEED = """
@@ -595,6 +651,12 @@ ALTER TABLE export_history  ADD COLUMN IF NOT EXISTS battery_compliance_name TEX
 ALTER TABLE quote_items     ADD COLUMN IF NOT EXISTS original_price REAL;
 DELETE FROM quote_rates WHERE key IN ('cell_clearing_customs_pct', 'bms_clearing_customs_pct');
 ALTER TABLE pending         ADD COLUMN IF NOT EXISTS completed_at BIGINT;
+ALTER TABLE oems            ADD COLUMN IF NOT EXISTS template_file BYTEA;
+ALTER TABLE oem_products       ADD COLUMN IF NOT EXISTS original_price REAL;
+ALTER TABLE oem_product_extras ADD COLUMN IF NOT EXISTS original_price REAL;
+ALTER TABLE pending_items   ADD COLUMN IF NOT EXISTS battery_certificate_name TEXT DEFAULT '';
+ALTER TABLE export_history  ADD COLUMN IF NOT EXISTS battery_certificate_name TEXT DEFAULT '';
+ALTER TABLE inquiry         ADD COLUMN IF NOT EXISTS battery_certificate TEXT;
 """
 
 

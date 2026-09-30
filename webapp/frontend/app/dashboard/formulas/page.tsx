@@ -355,7 +355,7 @@ function BackupTimesTable() {
 
 // ── Datasheet / GAD file manager ─────────────────────────────────────────────
 
-function FileManagerPanel({ folderKey }: { folderKey: "datasheets" | "gads" | "cell_certificates" | "battery_compliance" }) {
+function FileManagerPanel({ folderKey }: { folderKey: "datasheets" | "gads" | "cell_certificates" | "battery_compliance" | "battery_certificates" }) {
   const [view, setView] = useState<"active" | "archived">("active");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -467,7 +467,7 @@ function FileManagerPanel({ folderKey }: { folderKey: "datasheets" | "gads" | "c
     }
   };
 
-  const label = folderKey === "datasheets" ? "Datasheet" : folderKey === "gads" ? "GAD" : folderKey === "cell_certificates" ? "Cell Certificate" : "Battery Compliance";
+  const label = folderKey === "datasheets" ? "Datasheet" : folderKey === "gads" ? "GAD" : folderKey === "cell_certificates" ? "Cell Certificate" : folderKey === "battery_compliance" ? "Battery Compliance" : "Battery Certificate";
 
   return (
     <div className="flex flex-col gap-4">
@@ -600,16 +600,16 @@ function FileManagerPanel({ folderKey }: { folderKey: "datasheets" | "gads" | "c
   );
 }
 
-const DS_SUB_TAB_LABELS: Record<"datasheets" | "gads" | "cell_certificates" | "battery_compliance", string> = {
-  datasheets: "Datasheets", gads: "GAD", cell_certificates: "Cell Certificates", battery_compliance: "Battery Compliance",
+const DS_SUB_TAB_LABELS: Record<"datasheets" | "gads" | "cell_certificates" | "battery_compliance" | "battery_certificates", string> = {
+  datasheets: "Datasheets", gads: "GAD", cell_certificates: "Cell Certificates", battery_compliance: "Battery Compliance", battery_certificates: "Battery Certificates",
 };
 
 function DatasheetGadTab() {
-  const [subTab, setSubTab] = useState<"datasheets" | "gads" | "cell_certificates" | "battery_compliance">("datasheets");
+  const [subTab, setSubTab] = useState<"datasheets" | "gads" | "cell_certificates" | "battery_compliance" | "battery_certificates">("datasheets");
   return (
     <div className="flex flex-col gap-4">
       <div className="flex gap-1 border-b">
-        {(["datasheets", "gads", "cell_certificates", "battery_compliance"] as const).map((t) => (
+        {(["datasheets", "gads", "cell_certificates", "battery_compliance", "battery_certificates"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setSubTab(t)}

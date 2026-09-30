@@ -92,6 +92,7 @@ export interface PendingExportData {
   gad_name?: string;
   cell_certificate_name?: string;
   battery_compliance_name?: string;
+  battery_certificate_name?: string;
   remarks?: string;
 }
 
