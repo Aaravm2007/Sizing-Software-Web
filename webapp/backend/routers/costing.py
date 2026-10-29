@@ -1368,7 +1368,10 @@ def export_master(body: ExportMasterRequest, user=Depends(get_expert_user)):
 
 
 @router.post("/import-master")
-def import_master(file: UploadFile = File(...), password: str = Form(...), user=Depends(get_expert_user)):
+def import_master(
+    file: UploadFile = File(...), password: str = Form(...),
+    full_replace: bool = Form(False), user=Depends(get_expert_user),
+):
     from config import settings as _settings
     if password != _settings.COSTING_EXPORT_PASSWORD:
         raise HTTPException(403, "Incorrect password")
@@ -1390,58 +1393,113 @@ def import_master(file: UploadFile = File(...), password: str = Form(...), user=
 
     import sys
     sys.path.insert(0, str(APP_DIR))
+    from basefunctions import get_all_durations
     import pgfire
 
     PARTCODE_ROW = len(ROW_SPEC)
     updated = 0
+    created = 0
+    archived = 0
     skipped = []
     log_items = []
 
-    for duration in wb.sheetnames:
-        ws = wb[duration]
-        products = pgfire.get("products", duration)
-        by_code = {}
-        if products:
+    if full_replace:
+        # archive every currently-active product, everywhere — no matching,
+        # no exceptions
+        for duration in get_all_durations():
+            products = pgfire.get("products", duration)
+            if not products:
+                continue
             items = products.items() if isinstance(products, dict) else enumerate(products)
             for pid, p in items:
-                if isinstance(p, dict):
-                    code = str(p.get("Battery Partcode", "") or "").strip()
-                    if code:
-                        by_code[code] = (pid, p)
+                if isinstance(p, dict) and p.get("active"):
+                    pgfire.update("products", f"{duration}/{pid}", {"active": False})
+                    archived += 1
+                    log_items.append({
+                        "duration": duration, "product_id": str(pid),
+                        "battery_pack": str(p.get("Battery Pack", "")),
+                        "before": {"active": True}, "after": {"active": False},
+                    })
 
-        for c in range(2, ws.max_column + 1):
-            code_cell = ws.cell(row=PARTCODE_ROW, column=c).value
-            code = str(code_cell).strip() if code_cell else None
-            if not code or code not in by_code:
-                if code_cell:
-                    skipped.append(f"{duration}/{code_cell}")
-                continue
-            pid, product = by_code[code]
+        # then create every sheet row as a brand-new product — no lookup, no
+        # matching against what's already there
+        next_id = {}
+        for duration in wb.sheetnames:
+            ws = wb[duration]
+            if duration not in next_id:
+                ids = [k.split("/", 1)[1] for k in pgfire.list_keys("products", duration)]
+                numeric_ids = [int(i) for i in ids if i.isdigit()]
+                next_id[duration] = max(numeric_ids) if numeric_ids else 0
 
-            try:
-                changes = {key: ws.cell(row=r_idx, column=c).value for r_idx, (_label, key) in enumerate(ROW_SPEC, start=1)}
-                before = {k: product.get(k) for k in changes}
-                pgfire.update("products", f"{duration}/{pid}", changes)
-                updated += 1
-                log_items.append({
-                    "duration": duration, "product_id": str(pid),
-                    "battery_pack": str(product.get("Battery Pack", "")),
-                    "before": before, "after": changes,
-                })
-            except Exception as e:
-                skipped.append(f"{duration}/{code}: {e}")
+            for c in range(2, ws.max_column + 1):
+                code_cell = ws.cell(row=PARTCODE_ROW, column=c).value
+                if not code_cell:
+                    skipped.append(f"{duration}/col{c}: empty Battery Partcode")
+                    continue
+                try:
+                    changes = {key: ws.cell(row=r_idx, column=c).value for r_idx, (_label, key) in enumerate(ROW_SPEC, start=1)}
+                    changes["active"] = True
+                    next_id[duration] += 1
+                    new_pid = str(next_id[duration])
+                    pgfire.set("products", f"{duration}/{new_pid}", changes)
+                    created += 1
+                    log_items.append({
+                        "duration": duration, "product_id": new_pid,
+                        "battery_pack": str(changes.get("Battery Pack", "")),
+                        "before": {"_new": True}, "after": changes,
+                    })
+                except Exception as e:
+                    skipped.append(f"{duration}/{code_cell}: {e}")
+
+    else:
+        for duration in wb.sheetnames:
+            ws = wb[duration]
+            products = pgfire.get("products", duration)
+            by_code = {}
+            if products:
+                items = products.items() if isinstance(products, dict) else enumerate(products)
+                for pid, p in items:
+                    if isinstance(p, dict):
+                        code = str(p.get("Battery Partcode", "") or "").strip()
+                        if code:
+                            by_code[code] = (pid, p)
+
+            for c in range(2, ws.max_column + 1):
+                code_cell = ws.cell(row=PARTCODE_ROW, column=c).value
+                code = str(code_cell).strip() if code_cell else None
+                if not code or code not in by_code:
+                    if code_cell:
+                        skipped.append(f"{duration}/{code_cell}")
+                    continue
+                pid, product = by_code[code]
+
+                try:
+                    changes = {key: ws.cell(row=r_idx, column=c).value for r_idx, (_label, key) in enumerate(ROW_SPEC, start=1)}
+                    before = {k: product.get(k) for k in changes}
+                    pgfire.update("products", f"{duration}/{pid}", changes)
+                    updated += 1
+                    log_items.append({
+                        "duration": duration, "product_id": str(pid),
+                        "battery_pack": str(product.get("Battery Pack", "")),
+                        "before": before, "after": changes,
+                    })
+                except Exception as e:
+                    skipped.append(f"{duration}/{code}: {e}")
 
     log_id = None
     try:
         log_id = _write_mass_update_log(
-            user["username"], "import", "master_costing_import", None, None,
-            updated, backup_path.name, log_items,
+            user["username"], "full_replace" if full_replace else "import",
+            "master_costing_import", None, None,
+            updated + created + archived, backup_path.name, log_items,
         )
     except Exception as e:
         skipped.append(f"audit log write failed: {e}")
 
     return {
         "updated": updated,
+        "created": created,
+        "archived": archived,
         "skipped": len(skipped),
         "skipped_sample": skipped[:10],
         "backup_file": backup_path.name,
@@ -1517,7 +1575,11 @@ def mass_update_revert(log_id: int, body: RevertRequest, user=Depends(get_expert
     errors = []
     for it in items:
         try:
-            pgfire.update("products", f"{it['duration']}/{it['product_id']}", it["before"])
+            if isinstance(it["before"], dict) and it["before"].get("_new"):
+                # this item didn't exist before the change — revert means delete it
+                pgfire.delete("products", f"{it['duration']}/{it['product_id']}")
+            else:
+                pgfire.update("products", f"{it['duration']}/{it['product_id']}", it["before"])
             reverted_count += 1
         except Exception as e:
             errors.append(f"{it['duration']}/{it['product_id']}: {e}")

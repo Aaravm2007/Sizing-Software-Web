@@ -408,6 +408,7 @@ export default function AdminPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPassword, setImportPassword] = useState("");
+  const [importFullReplace, setImportFullReplace] = useState(false);
 
   const { data: users = [], isLoading } = useQuery<UserProfile[]>({
     queryKey: ["admin-users"],
@@ -489,20 +490,24 @@ export default function AdminPage() {
       const formData = new FormData();
       formData.append("file", importFile!);
       formData.append("password", importPassword);
+      formData.append("full_replace", String(importFullReplace));
       return api.post("/api/costing/import-master", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
     },
     onSuccess: (res) => {
       const d = res.data;
-      toast.success(
-        `Backed up to ${d.backup_file}. Updated ${d.updated} product(s)` +
-        (d.skipped ? ` · ${d.skipped} skipped (no live match)` : "") +
-        (d.log_id ? ` · see History #${d.log_id} to review/revert` : ""),
-      );
+      const parts = [`Backed up to ${d.backup_file}.`];
+      if (d.updated) parts.push(`Updated ${d.updated} product(s)`);
+      if (d.created) parts.push(`Created ${d.created} new product(s)`);
+      if (d.archived) parts.push(`archived ${d.archived} other(s)`);
+      if (d.skipped) parts.push(`${d.skipped} skipped`);
+      if (d.log_id) parts.push(`see History #${d.log_id} to review/revert`);
+      toast.success(parts.join(" · "));
       setImportOpen(false);
       setImportFile(null);
       setImportPassword("");
+      setImportFullReplace(false);
     },
     onError: (e: any) => toast.error(apiErr(e, "Import failed")),
   });
@@ -748,7 +753,7 @@ export default function AdminPage() {
       </Dialog>
 
       {/* ── Import Master Costing Sheet Dialog ── */}
-      <Dialog open={importOpen} onOpenChange={(v) => { setImportOpen(v); if (!v) { setImportFile(null); setImportPassword(""); } }}>
+      <Dialog open={importOpen} onOpenChange={(v) => { setImportOpen(v); if (!v) { setImportFile(null); setImportPassword(""); setImportFullReplace(false); } }}>
         <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Import Master Costing Sheet</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground py-1">
@@ -775,6 +780,21 @@ export default function AdminPage() {
               onKeyDown={(e) => e.key === "Enter" && importFile && importPassword && importMut.mutate()}
             />
           </div>
+          <label className="flex items-start gap-2 text-sm border rounded-md p-2.5 cursor-pointer border-red-300 dark:border-red-900 bg-red-50 dark:bg-red-950/30">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={importFullReplace}
+              onChange={(e) => setImportFullReplace(e.target.checked)}
+            />
+            <span>
+              <span className="font-semibold text-red-700 dark:text-red-400">Full replace.</span>{" "}
+              Archive every currently-active product first, then create every row in this sheet as a brand-new
+              product — no matching against existing data at all, even if a partcode already exists live.
+              After this, only the sheet's newly-created products are active/visible. Still fully revertible
+              from Mass Update History (reverting deletes the new ones and restores the archived ones).
+            </span>
+          </label>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button>
             <Button
@@ -782,7 +802,7 @@ export default function AdminPage() {
               disabled={importMut.isPending || !importFile || !importPassword}
               onClick={() => importMut.mutate()}
             >
-              {importMut.isPending ? "Importing…" : "Import"}
+              {importMut.isPending ? "Importing…" : importFullReplace ? "Replace All" : "Import"}
             </Button>
           </DialogFooter>
         </DialogContent>
