@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = ""
 
+    # Extra gate on the master costing export button — set via env var, never hardcode
+    COSTING_EXPORT_PASSWORD: str = ""
+
     # Firebase
     FIREBASE_API_KEY: str = ""
     DATABASE_URL: str = "https://sizing-software-default-rtdb.asia-southeast1.firebasedatabase.app"

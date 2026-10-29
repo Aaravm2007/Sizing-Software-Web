@@ -1,83 +1,45 @@
 """
-Revert the live Postgres database to the latest backup made by backup_database.py.
+Revert the live Postgres database from a backup dump file.
 
 Usage:
-    python scripts/revert_database.py
+    python scripts/revert_database.py                      # restores db_backups/latest.dump
+    python scripts/revert_database.py path/to/some.dump     # restores a specific dump (e.g. a mass-update backup)
 
 Always asks for a typed confirmation before running — this is destructive:
 it drops and recreates every object in the database from the dump,
-discarding anything written since the last backup.
+discarding anything written since that dump was taken.
 """
-import shutil
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-import os
 
-ROOT = Path(__file__).parent.parent.parent.parent
+from backup_utils import ROOT, run_pg_restore
+
 load_dotenv(ROOT / ".env")
 
-BACKUP_FILE = ROOT / "db_backups" / "latest.dump"
-
-
-def find_pg_bin(name: str) -> str:
-    exe = name + (".exe" if sys.platform == "win32" else "")
-    found = shutil.which(exe)
-    if found:
-        return found
-    if sys.platform == "win32":
-        for d in sorted(Path("C:/Program Files/PostgreSQL").glob("*/bin")):
-            candidate = d / exe
-            if candidate.exists():
-                return str(candidate)
-    sys.exit(f"Could not find {exe} — install PostgreSQL client tools or add its bin/ to PATH.")
-
-
-def dsn_parts():
-    dsn = os.environ.get("PG_DSN", "")
-    if not dsn:
-        sys.exit("PG_DSN not set in .env")
-    u = urlparse(dsn)
-    return {
-        "host": u.hostname or "localhost",
-        "port": str(u.port or 5432),
-        "user": u.username or "",
-        "password": u.password or "",
-        "dbname": (u.path or "/").lstrip("/"),
-    }
+DEFAULT_BACKUP_FILE = ROOT / "db_backups" / "latest.dump"
 
 
 def main():
-    if not BACKUP_FILE.exists():
-        sys.exit(f"No backup found at {BACKUP_FILE} — run backup_database.py first.")
+    backup_file = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_BACKUP_FILE
+    if not backup_file.exists():
+        sys.exit(f"No backup found at {backup_file}")
 
-    pg_restore = find_pg_bin("pg_restore")
-    parts = dsn_parts()
-
-    backed_at = datetime.fromtimestamp(BACKUP_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    backed_at = datetime.fromtimestamp(backup_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
     answer = input(
-        f"This will ERASE the current '{parts['dbname']}' database and replace it with "
-        f"{BACKUP_FILE} (backed up {backed_at}). Type YES to continue: "
+        f"This will ERASE the current database and replace it with "
+        f"{backup_file} (backed up {backed_at}). Type YES to continue: "
     )
     if answer.strip() != "YES":
         sys.exit("Aborted.")
 
-    env = os.environ.copy()
-    env["PGPASSWORD"] = parts["password"]
-
-    cmd = [
-        pg_restore, "--clean", "--if-exists", "--no-owner",
-        "-h", parts["host"], "-p", parts["port"], "-U", parts["user"],
-        "-d", parts["dbname"], str(BACKUP_FILE),
-    ]
-    print(f"Restoring '{parts['dbname']}' from {BACKUP_FILE} ...")
-    result = subprocess.run(cmd, env=env)
-    if result.returncode != 0:
-        sys.exit("pg_restore reported errors — see output above (some are harmless 'does not exist' notices on --clean).")
+    print(f"Restoring from {backup_file} ...")
+    try:
+        run_pg_restore(backup_file)
+    except RuntimeError as e:
+        sys.exit(f"{e}\n(some 'does not exist' notices from --clean are harmless)")
 
     print("Revert complete.")
 

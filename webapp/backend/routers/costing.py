@@ -14,7 +14,7 @@ TEMPLATE = str(APP_DIR / "templates" / "Costing_sheet_template.xlsx")
 import sys as _sys
 _sys.path.insert(0, str(APP_DIR))
 _sys.path.insert(0, str(BACKEND_DIR))
-from auth import get_current_user, get_admin_user, get_expert_user
+from auth import get_current_user, get_expert_user
 
 router = APIRouter()
 
@@ -53,7 +53,7 @@ COLUMNS = [
 
 # ── costing tree: per-user worksheet rows in Postgres (costing_tree) ─────────
 
-from pg import get_conn as _pg_conn
+from pg import get_conn as _pg_conn, dict_cur as _dict_cur
 import psycopg2.extras as _pgx
 
 
@@ -380,6 +380,29 @@ def _apply_mass_update(product: dict, field: str, multiplier: float) -> dict:
         updates["Per Kw pricing @ 2nd evel profit (B+5)"]       = round(esb5 / kw, 2)
 
     return updates
+
+
+def _write_mass_update_log(username: str, update_type: str, field: str, percent, cell_updates,
+                            updated_count: int, backup_file: str, items: list) -> int:
+    """Record a mass-update header + per-product before/after diff. Returns the log id."""
+    with _pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO mass_update_log
+               (username, update_type, field, percent, cell_updates, updated_count, backup_file)
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (username, update_type, field or "", percent,
+             _pgx.Json(cell_updates) if cell_updates is not None else None, updated_count, backup_file),
+        )
+        log_id = cur.fetchone()[0]
+        if items:
+            _pgx.execute_values(
+                cur,
+                "INSERT INTO mass_update_log_items (log_id, duration, product_id, battery_pack, before, after) VALUES %s",
+                [(log_id, it["duration"], it["product_id"], it["battery_pack"],
+                  _pgx.Json(it["before"]), _pgx.Json(it["after"])) for it in items],
+            )
+        return log_id
 
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
@@ -1082,7 +1105,7 @@ def bulk_restore(rows: List[CostingRow], user=Depends(get_current_user)):
 
 
 @router.post("/mass-update")
-def mass_update(body: MassUpdateRequest, user=Depends(get_admin_user)):
+def mass_update(body: MassUpdateRequest, user=Depends(get_expert_user)):
     from config import settings as _settings
     if body.admin_password != _settings.ADMIN_PASSWORD:
         raise HTTPException(403, "Incorrect admin password")
@@ -1090,6 +1113,12 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_admin_user)):
         raise HTTPException(400, f"Field '{body.field}' not supported for mass update")
     if body.percent == 0:
         raise HTTPException(400, "Percent cannot be 0")
+
+    from scripts.backup_utils import backup_for_mass_update
+    try:
+        backup_path = backup_for_mass_update(user["username"])
+    except Exception as e:
+        raise HTTPException(500, f"Backup failed, update aborted: {e}")
 
     multiplier = 1 + (body.percent / 100)
 
@@ -1106,6 +1135,7 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_admin_user)):
 
     updated_count = 0
     errors = []
+    log_items = []
 
     for duration in durations:
         try:
@@ -1122,6 +1152,11 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_admin_user)):
                     changes = _apply_mass_update(product, body.field, multiplier)
                     pgfire.update("products", f"{duration}/{pid}", changes)
                     updated_count += 1
+                    log_items.append({
+                        "duration": duration, "product_id": str(pid),
+                        "battery_pack": str(product.get("Battery Pack", "")),
+                        "before": {k: product.get(k) for k in changes}, "after": changes,
+                    })
                 except HTTPException:
                     raise
                 except Exception as e:
@@ -1131,10 +1166,21 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_admin_user)):
         except Exception as e:
             errors.append(f"{duration}: {e}")
 
+    log_id = None
+    try:
+        log_id = _write_mass_update_log(
+            user["username"], "percent", body.field, body.percent, None,
+            updated_count, backup_path.name, log_items,
+        )
+    except Exception as e:
+        errors.append(f"audit log write failed: {e}")
+
     return {
         "updated": updated_count,
         "durations": len(durations),
         "errors": errors[:10],
+        "backup_file": backup_path.name,
+        "log_id": log_id,
     }
 
 
@@ -1157,6 +1203,250 @@ def mass_update_preview(_=Depends(get_current_user)):
         raise
     except Exception as e:
         raise HTTPException(503, str(e))
+
+
+# ── FOB cost-per-cell mass update ────────────────────────────────────────────
+
+class FobCellUpdate(BaseModel):
+    cell_type: str
+    brand: str
+    new_cost: float
+
+
+class FobCellApplyRequest(BaseModel):
+    updates: List[FobCellUpdate]
+    admin_password: str
+
+
+@router.get("/mass-update/fob-preview")
+def mass_update_fob_preview(_=Depends(get_expert_user)):
+    """One row per unique (Type of Cell, Brand) across all active products, with cost range."""
+    try:
+        import sys
+        sys.path.insert(0, str(APP_DIR))
+        from basefunctions import get_all_durations
+        import pgfire
+        durations = get_all_durations()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"Database error: {e}")
+
+    groups: Dict[tuple, dict] = {}
+    for duration in durations:
+        products = pgfire.get("products", duration)
+        if not products:
+            continue
+        items = products.items() if isinstance(products, dict) else enumerate(products)
+        for _pid, product in items:
+            if not isinstance(product, dict) or not product.get("active"):
+                continue
+            key = (str(product.get("Type of Cell", "") or ""), str(product.get("Brand and type of cell", "") or ""))
+            cost = _f(product, "FOB Cost Of Cells")
+            g = groups.setdefault(key, {"min_cost": cost, "max_cost": cost, "product_count": 0})
+            g["min_cost"] = min(g["min_cost"], cost)
+            g["max_cost"] = max(g["max_cost"], cost)
+            g["product_count"] += 1
+
+    return [
+        {"cell_type": k[0], "brand": k[1], "min_cost": round(v["min_cost"], 4),
+         "max_cost": round(v["max_cost"], 4), "product_count": v["product_count"]}
+        for k, v in sorted(groups.items())
+    ]
+
+
+@router.post("/mass-update/fob-apply")
+def mass_update_fob_apply(body: FobCellApplyRequest, user=Depends(get_expert_user)):
+    from config import settings as _settings
+    if body.admin_password != _settings.ADMIN_PASSWORD:
+        raise HTTPException(403, "Incorrect admin password")
+    if not body.updates:
+        raise HTTPException(400, "No cell updates given")
+
+    from scripts.backup_utils import backup_for_mass_update
+    try:
+        backup_path = backup_for_mass_update(user["username"])
+    except Exception as e:
+        raise HTTPException(500, f"Backup failed, update aborted: {e}")
+
+    try:
+        import sys
+        sys.path.insert(0, str(APP_DIR))
+        from basefunctions import get_all_durations
+        import pgfire
+        durations = get_all_durations()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"Database error: {e}")
+
+    new_cost_by_key = {(u.cell_type, u.brand): u.new_cost for u in body.updates}
+
+    updated_count = 0
+    cell_types_changed = set()
+    errors = []
+    log_items = []
+
+    for duration in durations:
+        try:
+            products = pgfire.get("products", duration)
+            if not products:
+                continue
+            items = products.items() if isinstance(products, dict) else enumerate(products)
+            for pid, product in items:
+                if not isinstance(product, dict) or not product.get("active"):
+                    continue
+                key = (str(product.get("Type of Cell", "") or ""), str(product.get("Brand and type of cell", "") or ""))
+                if key not in new_cost_by_key:
+                    continue
+                try:
+                    old_fob = _f(product, "FOB Cost Of Cells")
+                    if old_fob == 0:
+                        raise ValueError("existing FOB Cost Of Cells is 0 — cannot compute ratio")
+                    multiplier = new_cost_by_key[key] / old_fob
+                    changes = _apply_mass_update(product, "fob_cost", multiplier)
+                    pgfire.update("products", f"{duration}/{pid}", changes)
+                    updated_count += 1
+                    cell_types_changed.add(key)
+                    log_items.append({
+                        "duration": duration, "product_id": str(pid),
+                        "battery_pack": str(product.get("Battery Pack", "")),
+                        "before": {k: product.get(k) for k in changes}, "after": changes,
+                    })
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    errors.append(f"{duration}/{pid}: {e}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            errors.append(f"{duration}: {e}")
+
+    log_id = None
+    try:
+        log_id = _write_mass_update_log(
+            user["username"], "fob", "fob_cost", None,
+            [u.dict() for u in body.updates], updated_count, backup_path.name, log_items,
+        )
+    except Exception as e:
+        errors.append(f"audit log write failed: {e}")
+
+    return {
+        "updated": updated_count,
+        "cell_types_changed": len(cell_types_changed),
+        "errors": errors[:10],
+        "backup_file": backup_path.name,
+        "log_id": log_id,
+    }
+
+
+# ── master costing export (admin tab button) ─────────────────────────────────
+# Separate from the disabled per-user tree export below: this reads the whole
+# products catalog, not a user's local tree.
+
+class ExportMasterRequest(BaseModel):
+    password: str
+
+
+@router.post("/export-master")
+def export_master(body: ExportMasterRequest, user=Depends(get_expert_user)):
+    from config import settings as _settings
+    if body.password != _settings.COSTING_EXPORT_PASSWORD:
+        raise HTTPException(403, "Incorrect password")
+
+    from scripts.export_costing_excel import build_costing_export
+    try:
+        dest = build_costing_export()
+    except Exception as e:
+        raise HTTPException(500, f"Export failed: {e}")
+
+    return FileResponse(
+        str(dest),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=dest.name,
+    )
+
+
+# ── mass-update history + revert ─────────────────────────────────────────────
+
+@router.get("/mass-update/history")
+def mass_update_history(_=Depends(get_expert_user)):
+    with _pg_conn() as conn:
+        cur = _dict_cur(conn)
+        cur.execute(
+            """SELECT id, created_at, username, update_type, field, percent, cell_updates,
+                      updated_count, backup_file, reverted_at, reverted_by
+               FROM mass_update_log ORDER BY created_at DESC"""
+        )
+        return cur.fetchall()
+
+
+@router.get("/mass-update/history/{log_id}")
+def mass_update_history_detail(log_id: int, _=Depends(get_expert_user)):
+    with _pg_conn() as conn:
+        cur = _dict_cur(conn)
+        cur.execute("SELECT * FROM mass_update_log WHERE id = %s", (log_id,))
+        header = cur.fetchone()
+        if not header:
+            raise HTTPException(404, "Not found")
+        cur.execute(
+            "SELECT duration, product_id, battery_pack, before, after FROM mass_update_log_items WHERE log_id = %s ORDER BY id",
+            (log_id,),
+        )
+        items = cur.fetchall()
+    return {"header": header, "items": items}
+
+
+class RevertRequest(BaseModel):
+    admin_password: str
+
+
+@router.post("/mass-update/history/{log_id}/revert")
+def mass_update_revert(log_id: int, body: RevertRequest, user=Depends(get_expert_user)):
+    from config import settings as _settings
+    if body.admin_password != _settings.ADMIN_PASSWORD:
+        raise HTTPException(403, "Incorrect admin password")
+
+    with _pg_conn() as conn:
+        cur = _dict_cur(conn)
+        cur.execute("SELECT * FROM mass_update_log WHERE id = %s", (log_id,))
+        header = cur.fetchone()
+        if not header:
+            raise HTTPException(404, "Not found")
+        if header["reverted_at"]:
+            raise HTTPException(409, "This update was already reverted")
+        cur.execute(
+            "SELECT duration, product_id, before FROM mass_update_log_items WHERE log_id = %s",
+            (log_id,),
+        )
+        items = cur.fetchall()
+
+    from scripts.backup_utils import backup_for_mass_update
+    try:
+        backup_path = backup_for_mass_update(user["username"])
+    except Exception as e:
+        raise HTTPException(500, f"Backup failed, revert aborted: {e}")
+
+    import sys
+    sys.path.insert(0, str(APP_DIR))
+    import pgfire
+
+    reverted_count = 0
+    errors = []
+    for it in items:
+        try:
+            pgfire.update("products", f"{it['duration']}/{it['product_id']}", it["before"])
+            reverted_count += 1
+        except Exception as e:
+            errors.append(f"{it['duration']}/{it['product_id']}: {e}")
+
+    with _pg_conn() as conn:
+        conn.cursor().execute(
+            "UPDATE mass_update_log SET reverted_at = CURRENT_TIMESTAMP, reverted_by = %s WHERE id = %s",
+            (user["username"], log_id),
+        )
+
+    return {"reverted": reverted_count, "errors": errors[:10], "backup_file": backup_path.name}
 
 
 # COSTING EXPORT DISABLED — do not re-enable without authorisation

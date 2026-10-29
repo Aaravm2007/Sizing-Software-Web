@@ -579,6 +579,31 @@ CREATE TABLE IF NOT EXISTS oem_product_extras (
     sort_order  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_oem_product_extras_product ON oem_product_extras(product_id);
+
+CREATE TABLE IF NOT EXISTS mass_update_log (
+    id                  SERIAL PRIMARY KEY,
+    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    username            TEXT NOT NULL,
+    update_type         TEXT NOT NULL,  -- 'percent' | 'fob'
+    field               TEXT DEFAULT '',
+    percent             REAL,
+    cell_updates        JSONB,
+    updated_count       INTEGER NOT NULL DEFAULT 0,
+    backup_file         TEXT DEFAULT '',
+    reverted_at         TIMESTAMP,
+    reverted_by         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS mass_update_log_items (
+    id              SERIAL PRIMARY KEY,
+    log_id          INTEGER NOT NULL REFERENCES mass_update_log(id) ON DELETE CASCADE,
+    duration        TEXT NOT NULL,
+    product_id      TEXT NOT NULL,
+    battery_pack    TEXT DEFAULT '',
+    before          JSONB NOT NULL,
+    after           JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mass_update_log_items_log ON mass_update_log_items(log_id);
 """
 
 _SEED = """

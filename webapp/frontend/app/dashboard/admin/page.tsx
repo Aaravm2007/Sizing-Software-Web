@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { RefreshCw, Loader2 } from "lucide-react";
+import { RefreshCw, Loader2, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface UserProfile {
@@ -43,6 +43,172 @@ function fmtUptime(s: number) {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   return `${h}h ${m}m`;
+}
+
+// ── Mass Update History Tab ───────────────────────────────────────────────────
+
+interface MassUpdateLogRow {
+  id: number;
+  created_at: string;
+  username: string;
+  update_type: "percent" | "fob";
+  field: string;
+  percent: number | null;
+  cell_updates: { cell_type: string; brand: string; new_cost: number }[] | null;
+  updated_count: number;
+  backup_file: string;
+  reverted_at: string | null;
+  reverted_by: string | null;
+}
+
+interface MassUpdateLogItem {
+  duration: string;
+  product_id: string;
+  battery_pack: string;
+  before: Record<string, any>;
+  after: Record<string, any>;
+}
+
+function summarizeLog(row: MassUpdateLogRow) {
+  if (row.update_type === "fob") return `${row.cell_updates?.length ?? 0} cell type(s)`;
+  return `${row.field} ${row.percent! > 0 ? "+" : ""}${row.percent}%`;
+}
+
+function MassUpdateHistoryTab() {
+  const qc = useQueryClient();
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [revertPassword, setRevertPassword] = useState("");
+
+  const { data: rows = [], isLoading } = useQuery<MassUpdateLogRow[]>({
+    queryKey: ["mass-update-history"],
+    queryFn: () => api.get("/api/costing/mass-update/history").then((r) => r.data),
+  });
+
+  const { data: detail, isLoading: detailLoading } = useQuery<{ header: MassUpdateLogRow; items: MassUpdateLogItem[] }>({
+    queryKey: ["mass-update-history-detail", detailId],
+    queryFn: () => api.get(`/api/costing/mass-update/history/${detailId}`).then((r) => r.data),
+    enabled: detailId !== null,
+  });
+
+  const revertMut = useMutation({
+    mutationFn: () => api.post(`/api/costing/mass-update/history/${detailId}/revert`, { admin_password: revertPassword }),
+    onSuccess: (res) => {
+      const d = res.data;
+      toast.success(`Reverted ${d.reverted} product(s). Backed up to ${d.backup_file}` + (d.errors?.length ? ` · ${d.errors.length} error(s)` : ""));
+      setRevertPassword("");
+      setDetailId(null);
+      qc.invalidateQueries({ queryKey: ["mass-update-history"] });
+    },
+    onError: (e: any) => toast.error(apiErr(e, "Revert failed")),
+  });
+
+  return (
+    <>
+      <div className="border rounded-md overflow-auto">
+        {isLoading ? (
+          <div className="py-10 text-center text-muted-foreground text-sm">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="py-10 text-center text-muted-foreground text-sm">No mass updates recorded yet.</div>
+        ) : (
+          <table className="table-grid w-full text-sm">
+            <thead className="bg-muted sticky top-0">
+              <tr>
+                <th className="text-left py-2.5 px-4">Timestamp</th>
+                <th className="text-left py-2.5 px-4">User</th>
+                <th className="text-left py-2.5 px-4">Type</th>
+                <th className="text-left py-2.5 px-4">Summary</th>
+                <th className="text-right py-2.5 px-4">Products Changed</th>
+                <th className="text-center py-2.5 px-4">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className={cn("hover:bg-accent/50 cursor-pointer select-none", row.reverted_at && "opacity-50")}
+                  onDoubleClick={() => setDetailId(row.id)}
+                  title="Double-click for details"
+                >
+                  <td className="py-2.5 px-4 whitespace-nowrap">{new Date(row.created_at).toLocaleString()}</td>
+                  <td className="py-2.5 px-4 font-mono">{row.username}</td>
+                  <td className="py-2.5 px-4 capitalize">{row.update_type}</td>
+                  <td className="py-2.5 px-4">{summarizeLog(row)}</td>
+                  <td className="py-2.5 px-4 text-right">{row.updated_count}</td>
+                  <td className="py-2 px-4 text-center">
+                    {row.reverted_at
+                      ? <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">Reverted</span>
+                      : <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">Active</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <Dialog open={detailId !== null} onOpenChange={(v) => { if (!v) { setDetailId(null); setRevertPassword(""); } }}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Mass Update #{detailId}</DialogTitle></DialogHeader>
+          {detailLoading || !detail ? (
+            <div className="py-10 text-center text-muted-foreground text-sm">Loading…</div>
+          ) : (
+            <div className="flex flex-col gap-3 text-sm">
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                <span>By <span className="font-mono text-foreground">{detail.header.username}</span></span>
+                <span>{new Date(detail.header.created_at).toLocaleString()}</span>
+                <span>{summarizeLog(detail.header)}</span>
+                <span>Backup: <span className="font-mono text-foreground">{detail.header.backup_file}</span></span>
+                {detail.header.reverted_at && (
+                  <span className="text-foreground font-semibold">
+                    Reverted by {detail.header.reverted_by} at {new Date(detail.header.reverted_at).toLocaleString()}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 max-h-80 overflow-y-auto border rounded-md p-2">
+                {detail.items.map((it, idx) => (
+                  <div key={idx} className="border-b last:border-0 pb-2 last:pb-0">
+                    <div className="text-xs font-semibold mb-1">{it.duration} — {it.battery_pack || it.product_id}</div>
+                    <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-0.5 text-xs">
+                      {Object.keys(it.after).map((field) => (
+                        <div key={field} className="contents">
+                          <span className="text-muted-foreground">{field}</span>
+                          <span className="font-mono text-right">{String(it.before[field] ?? "—")}</span>
+                          <span className="font-mono text-right">→ {String(it.after[field])}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {!detail.header.reverted_at && (
+                <div className="flex items-end gap-2 pt-2 border-t">
+                  <div className="flex flex-col gap-1 flex-1">
+                    <Label>Admin Password</Label>
+                    <Input
+                      type="password"
+                      placeholder="Enter admin password to revert"
+                      value={revertPassword}
+                      onChange={(e) => setRevertPassword(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && revertPassword && revertMut.mutate()}
+                    />
+                  </div>
+                  <Button
+                    variant="destructive"
+                    disabled={revertMut.isPending || !revertPassword}
+                    onClick={() => revertMut.mutate()}
+                  >
+                    {revertMut.isPending ? "Reverting…" : "Revert This Update"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 // ── Server Status Tab ─────────────────────────────────────────────────────────
@@ -214,7 +380,7 @@ function ServerStatusTab() {
 export default function AdminPage() {
   const qc = useQueryClient();
   const { isExpert, isLoading: meLoading } = useMe();
-  const [tab, setTab] = useState<"users" | "server">("users");
+  const [tab, setTab] = useState<"users" | "server" | "history">("users");
 
   // ── create user dialog ─────────────────────────────────────────────────
   const [createOpen, setCreateOpen] = useState(false);
@@ -231,6 +397,10 @@ export default function AdminPage() {
 
   // ── delete confirm ─────────────────────────────────────────────────────
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  // ── export master costing sheet ────────────────────────────────────────
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportPassword, setExportPassword] = useState("");
 
   const { data: users = [], isLoading } = useQuery<UserProfile[]>({
     queryKey: ["admin-users"],
@@ -278,6 +448,35 @@ export default function AdminPage() {
     onError: (e: any) => toast.error(apiErr(e, "Failed to delete user")),
   });
 
+  const exportMut = useMutation({
+    mutationFn: () =>
+      api.post("/api/costing/export-master", { password: exportPassword }, { responseType: "blob" }),
+    onSuccess: (res) => {
+      const disposition = res.headers["content-disposition"] || "";
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const filename = match ? match[1] : "costing_export.xlsx";
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("Export downloaded");
+      setExportOpen(false);
+      setExportPassword("");
+    },
+    onError: async (e: any) => {
+      const blob = e?.response?.data;
+      if (blob instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await blob.text());
+          toast.error(parsed.detail || "Export failed");
+          return;
+        } catch { /* not JSON, fall through */ }
+      }
+      toast.error(apiErr(e, "Export failed"));
+    },
+  });
+
   const openEdit = (u: UserProfile) => {
     setEditUser(u); setEEmail(u.email); setERole(u.role); setEPassword("");
   };
@@ -296,7 +495,7 @@ export default function AdminPage() {
       <div className="flex items-center gap-4 shrink-0 flex-wrap">
         <h1 className="text-2xl font-bold">Admin</h1>
         <div className="flex gap-1 p-1 rounded-lg bg-muted ml-2">
-          {([["users", "User Management"], ["server", "Server Status"]] as const).map(([key, label]) => (
+          {([["users", "User Management"], ["server", "Server Status"], ["history", "Mass Update History"]] as const).map(([key, label]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -309,6 +508,9 @@ export default function AdminPage() {
             >{label}</button>
           ))}
         </div>
+        <Button size="sm" variant="outline" className={tab === "users" ? "" : "ml-auto"} onClick={() => setExportOpen(true)}>
+          <Download className="h-4 w-4 mr-1.5" /> Export Master Costing Sheet
+        </Button>
         {tab === "users" && (
           <Button size="sm" className="ml-auto" onClick={() => setCreateOpen(true)}>
             + Add User
@@ -384,6 +586,9 @@ export default function AdminPage() {
 
       {/* ── Server Status tab ── */}
       {tab === "server" && <ServerStatusTab />}
+
+      {/* ── Mass Update History tab ── */}
+      {tab === "history" && <MassUpdateHistoryTab />}
 
       {/* ── Create User Dialog ── */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -476,6 +681,34 @@ export default function AdminPage() {
               onClick={() => deleteTarget && deleteMut.mutate(deleteTarget)}
             >
               {deleteMut.isPending ? "Deleting…" : "Delete User"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Export Master Costing Sheet Dialog ── */}
+      <Dialog open={exportOpen} onOpenChange={(v) => { setExportOpen(v); if (!v) setExportPassword(""); }}>
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Export Master Costing Sheet</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground py-1">
+            Exports every active product across every duration to an Excel workbook, one sheet per duration.
+            Enter the secret password to continue.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <Label>Password</Label>
+            <Input
+              type="password"
+              placeholder="Secret password"
+              value={exportPassword}
+              onChange={(e) => setExportPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && exportPassword && exportMut.mutate()}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setExportOpen(false)}>Cancel</Button>
+            <Button disabled={exportMut.isPending || !exportPassword} onClick={() => exportMut.mutate()}>
+              {exportMut.isPending ? "Exporting…" : "Export"}
             </Button>
           </DialogFooter>
         </DialogContent>
