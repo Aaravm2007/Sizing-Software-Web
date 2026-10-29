@@ -1396,7 +1396,7 @@ def import_master(
     from basefunctions import get_all_durations
     import pgfire
 
-    PARTCODE_ROW = len(ROW_SPEC)
+    PARTCODE_ROW = next(i for i, (_label, key) in enumerate(ROW_SPEC, start=1) if key == "Battery Partcode")
     updated = 0
     created = 0
     archived = 0

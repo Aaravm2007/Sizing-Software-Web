@@ -74,6 +74,9 @@ ROW_SPEC = [
     ("Brand and type of cell", "Brand and type of cell"),
     ("Installation indoor or outdoor", "Installation indoor or outdoor"),
     ("Battery Partcode", "Battery Partcode"),
+    ("Dollar Rate", "Dollar Rate"),
+    ("Creation Date", "Creation Date"),
+    ("Created By", "Created By"),
 ]
 
 
