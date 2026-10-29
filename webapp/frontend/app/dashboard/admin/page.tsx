@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { RefreshCw, Loader2, Download } from "lucide-react";
+import { RefreshCw, Loader2, Download, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface UserProfile {
@@ -51,7 +51,7 @@ interface MassUpdateLogRow {
   id: number;
   created_at: string;
   username: string;
-  update_type: "percent" | "fob";
+  update_type: "percent" | "fob" | "import" | "margin_recalc" | string;
   field: string;
   percent: number | null;
   cell_updates: { cell_type: string; brand: string; new_cost: number }[] | null;
@@ -71,7 +71,9 @@ interface MassUpdateLogItem {
 
 function summarizeLog(row: MassUpdateLogRow) {
   if (row.update_type === "fob") return `${row.cell_updates?.length ?? 0} cell type(s)`;
-  return `${row.field} ${row.percent! > 0 ? "+" : ""}${row.percent}%`;
+  if (row.update_type === "import") return "Master costing sheet import";
+  if (row.update_type === "percent") return `${row.field} ${row.percent! > 0 ? "+" : ""}${row.percent}%`;
+  return row.field || row.update_type;
 }
 
 function MassUpdateHistoryTab() {
@@ -402,6 +404,11 @@ export default function AdminPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPassword, setExportPassword] = useState("");
 
+  // ── import master costing sheet ────────────────────────────────────────
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPassword, setImportPassword] = useState("");
+
   const { data: users = [], isLoading } = useQuery<UserProfile[]>({
     queryKey: ["admin-users"],
     queryFn: () => api.get("/api/auth/users").then((r) => r.data),
@@ -477,6 +484,29 @@ export default function AdminPage() {
     },
   });
 
+  const importMut = useMutation({
+    mutationFn: () => {
+      const formData = new FormData();
+      formData.append("file", importFile!);
+      formData.append("password", importPassword);
+      return api.post("/api/costing/import-master", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+    },
+    onSuccess: (res) => {
+      const d = res.data;
+      toast.success(
+        `Backed up to ${d.backup_file}. Updated ${d.updated} product(s)` +
+        (d.skipped ? ` · ${d.skipped} skipped (no live match)` : "") +
+        (d.log_id ? ` · see History #${d.log_id} to review/revert` : ""),
+      );
+      setImportOpen(false);
+      setImportFile(null);
+      setImportPassword("");
+    },
+    onError: (e: any) => toast.error(apiErr(e, "Import failed")),
+  });
+
   const openEdit = (u: UserProfile) => {
     setEditUser(u); setEEmail(u.email); setERole(u.role); setEPassword("");
   };
@@ -510,6 +540,9 @@ export default function AdminPage() {
         </div>
         <Button size="sm" variant="outline" className={tab === "users" ? "" : "ml-auto"} onClick={() => setExportOpen(true)}>
           <Download className="h-4 w-4 mr-1.5" /> Export Master Costing Sheet
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+          <Upload className="h-4 w-4 mr-1.5" /> Import Master Costing Sheet
         </Button>
         {tab === "users" && (
           <Button size="sm" className="ml-auto" onClick={() => setCreateOpen(true)}>
@@ -709,6 +742,47 @@ export default function AdminPage() {
             <Button variant="ghost" onClick={() => setExportOpen(false)}>Cancel</Button>
             <Button disabled={exportMut.isPending || !exportPassword} onClick={() => exportMut.mutate()}>
               {exportMut.isPending ? "Exporting…" : "Export"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Import Master Costing Sheet Dialog ── */}
+      <Dialog open={importOpen} onOpenChange={(v) => { setImportOpen(v); if (!v) { setImportFile(null); setImportPassword(""); } }}>
+        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Import Master Costing Sheet</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground py-1">
+            Upload an Excel file in the same format as the export (one sheet per duration, one column per product).
+            Every matched product (by Battery Partcode) is fully overwritten with the sheet's data. A full database
+            backup is taken automatically first, and the whole import can be reverted from Mass Update History.
+            Products in the sheet with no live match are skipped, not inserted.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <Label>Excel File</Label>
+            <Input
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Password</Label>
+            <Input
+              type="password"
+              placeholder="Secret password"
+              value={importPassword}
+              onChange={(e) => setImportPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && importFile && importPassword && importMut.mutate()}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={importMut.isPending || !importFile || !importPassword}
+              onClick={() => importMut.mutate()}
+            >
+              {importMut.isPending ? "Importing…" : "Import"}
             </Button>
           </DialogFooter>
         </DialogContent>

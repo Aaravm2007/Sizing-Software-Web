@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -1365,6 +1365,88 @@ def export_master(body: ExportMasterRequest, user=Depends(get_expert_user)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=dest.name,
     )
+
+
+@router.post("/import-master")
+def import_master(file: UploadFile = File(...), password: str = Form(...), user=Depends(get_expert_user)):
+    from config import settings as _settings
+    if password != _settings.COSTING_EXPORT_PASSWORD:
+        raise HTTPException(403, "Incorrect password")
+
+    import io
+    import openpyxl
+    from scripts.export_costing_excel import ROW_SPEC
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file.file.read()), data_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"Could not read Excel file: {e}")
+
+    from scripts.backup_utils import backup_for_mass_update
+    try:
+        backup_path = backup_for_mass_update(user["username"])
+    except Exception as e:
+        raise HTTPException(500, f"Backup failed, import aborted: {e}")
+
+    import sys
+    sys.path.insert(0, str(APP_DIR))
+    import pgfire
+
+    PARTCODE_ROW = len(ROW_SPEC)
+    updated = 0
+    skipped = []
+    log_items = []
+
+    for duration in wb.sheetnames:
+        ws = wb[duration]
+        products = pgfire.get("products", duration)
+        by_code = {}
+        if products:
+            items = products.items() if isinstance(products, dict) else enumerate(products)
+            for pid, p in items:
+                if isinstance(p, dict):
+                    code = str(p.get("Battery Partcode", "") or "").strip()
+                    if code:
+                        by_code[code] = (pid, p)
+
+        for c in range(2, ws.max_column + 1):
+            code_cell = ws.cell(row=PARTCODE_ROW, column=c).value
+            code = str(code_cell).strip() if code_cell else None
+            if not code or code not in by_code:
+                if code_cell:
+                    skipped.append(f"{duration}/{code_cell}")
+                continue
+            pid, product = by_code[code]
+
+            try:
+                changes = {key: ws.cell(row=r_idx, column=c).value for r_idx, (_label, key) in enumerate(ROW_SPEC, start=1)}
+                before = {k: product.get(k) for k in changes}
+                pgfire.update("products", f"{duration}/{pid}", changes)
+                updated += 1
+                log_items.append({
+                    "duration": duration, "product_id": str(pid),
+                    "battery_pack": str(product.get("Battery Pack", "")),
+                    "before": before, "after": changes,
+                })
+            except Exception as e:
+                skipped.append(f"{duration}/{code}: {e}")
+
+    log_id = None
+    try:
+        log_id = _write_mass_update_log(
+            user["username"], "import", "master_costing_import", None, None,
+            updated, backup_path.name, log_items,
+        )
+    except Exception as e:
+        skipped.append(f"audit log write failed: {e}")
+
+    return {
+        "updated": updated,
+        "skipped": len(skipped),
+        "skipped_sample": skipped[:10],
+        "backup_file": backup_path.name,
+        "log_id": log_id,
+    }
 
 
 # ── mass-update history + revert ─────────────────────────────────────────────
