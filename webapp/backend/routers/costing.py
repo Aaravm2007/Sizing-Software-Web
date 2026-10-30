@@ -277,23 +277,49 @@ def _f(product: dict, key: str) -> float:
     return float(product.get(key) or 0)
 
 
-def _apply_mass_update(product: dict, field: str, multiplier: float) -> dict:
+def _get_costing_presets() -> dict:
+    """Live costing_presets as {key: value}, with the same fallbacks the
+    product-creation form (new/page.tsx) uses if a row is somehow missing."""
+    defaults = {
+        "cell_clearing_customs_pct": 7.5,
+        "bms_clearing_customs_pct": 18.0,
+        "margin_tier1_pct": 6.0,
+        "margin_tier2_pct": 10.0,
+    }
+    try:
+        with _pg_conn() as conn:
+            cur = _dict_cur(conn)
+            cur.execute("SELECT key, value FROM costing_presets")
+            defaults.update({r["key"]: r["value"] for r in cur.fetchall()})
+    except Exception:
+        pass
+    return defaults
+
+
+def _apply_mass_update(product: dict, field: str, multiplier: float, presets: dict = None) -> dict:
     """Return {firebase_field: new_value} for all affected fields."""
+    presets = presets if presets is not None else _get_costing_presets()
+    dollar_rate = _f(product, "Dollar Rate") or 1
     updates: dict = {}
     fb_name = _FB[field]
 
     if field == "fob_cost":
         old_fob = _f(product, "FOB Cost Of Cells")
         old_total_fob = _f(product, "Total FOB Cost of Cells")
-        old_cost_inr_1 = _f(product, "Cost In INR-(1)")
 
         new_fob = old_fob * multiplier
         new_total_fob = old_total_fob * multiplier
-        ratio = new_total_fob / old_total_fob if old_total_fob else 1
-        new_cost_inr_1 = old_cost_inr_1 * ratio
+
+        cell_pct = presets["cell_clearing_customs_pct"]
+        new_cc1 = new_total_fob * (cell_pct / 100)
+        new_landed1 = new_total_fob + new_cc1
+        new_cost_inr_1 = new_landed1 * dollar_rate
+        old_cost_inr_1 = _f(product, "Cost In INR-(1)")
 
         updates["FOB Cost Of Cells"] = round(new_fob, 4)
         updates["Total FOB Cost of Cells"] = round(new_total_fob, 2)
+        updates["Clearing & Customs 1"] = round(new_cc1, 2)
+        updates["Total Landed cost In India 1"] = round(new_landed1, 2)
         updates["Cost In INR-(1)"] = round(new_cost_inr_1, 2)
 
         old_landing = _f(product, "Landing cost of material (1+2+3)")
@@ -369,15 +395,21 @@ def _apply_mass_update(product: dict, field: str, multiplier: float) -> dict:
     updates["Warranty  & Service provision"]              = round(new_warranty, 2)
     updates["Production Labour & Assembly overheads"]     = round(new_labour, 2)
     updates["Total Cost of Pack (A)"]                     = round(new_total, 2)
-    m10  = new_total * 0.1;  updates["Margin @10 % On Cost"]  = round(m10, 2)
-    m15  = new_total * 0.15; updates["Margin @15% On Cost"]   = round(m15, 2)
-    esb  = new_total + m10;  updates["Estimated Sales Cost-(B)"]   = round(esb, 2)
-    esb5 = new_total + m15;  updates["Estimated Sales Cost-(B+5)"] = round(esb5, 2)
+    # "Margin @10 % On Cost" / "Estimated Sales Cost-(B)" are legacy field
+    # names frozen from before the 6%/10% rework — they now hold tier1 (6%)
+    # by convention, same mapping used by the exporter/importer. Don't swap
+    # this or it reintroduces the margin-drift bug the rest of this session
+    # fixed.
+    m_tier1 = new_total * (presets["margin_tier1_pct"] / 100); updates["Margin @10 % On Cost"]  = round(m_tier1, 2)
+    m_tier2 = new_total * (presets["margin_tier2_pct"] / 100); updates["Margin @15% On Cost"]   = round(m_tier2, 2)
+    esb  = new_total + m_tier1; updates["Estimated Sales Cost-(B)"]   = round(esb, 2)
+    esb5 = new_total + m_tier2; updates["Estimated Sales Cost-(B+5)"] = round(esb5, 2)
     kw   = _f(product, "KW calculation")
     if kw > 0:
-        updates["Per Kw Pricing @ cost (A)"]                   = round(new_total / kw, 2)
-        updates["Per Kw pricing @ ist level profit (B)"]        = round(esb / kw, 2)
-        updates["Per Kw pricing @ 2nd evel profit (B+5)"]       = round(esb5 / kw, 2)
+        # matches new/page.tsx: per-kW figures are converted back to USD
+        updates["Per Kw Pricing @ cost (A)"]                   = round((new_total / kw) / dollar_rate, 2)
+        updates["Per Kw pricing @ ist level profit (B)"]        = round((esb / kw) / dollar_rate, 2)
+        updates["Per Kw pricing @ 2nd evel profit (B+5)"]       = round((esb5 / kw) / dollar_rate, 2)
 
     return updates
 
@@ -1136,6 +1168,7 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_expert_user)):
     updated_count = 0
     errors = []
     log_items = []
+    presets = _get_costing_presets()
 
     for duration in durations:
         try:
@@ -1149,7 +1182,7 @@ def mass_update(body: MassUpdateRequest, user=Depends(get_expert_user)):
                 if not product.get("active"):
                     continue
                 try:
-                    changes = _apply_mass_update(product, body.field, multiplier)
+                    changes = _apply_mass_update(product, body.field, multiplier, presets)
                     pgfire.update("products", f"{duration}/{pid}", changes)
                     updated_count += 1
                     log_items.append({
@@ -1286,6 +1319,7 @@ def mass_update_fob_apply(body: FobCellApplyRequest, user=Depends(get_expert_use
     cell_types_changed = set()
     errors = []
     log_items = []
+    presets = _get_costing_presets()
 
     for duration in durations:
         try:
@@ -1304,7 +1338,7 @@ def mass_update_fob_apply(body: FobCellApplyRequest, user=Depends(get_expert_use
                     if old_fob == 0:
                         raise ValueError("existing FOB Cost Of Cells is 0 — cannot compute ratio")
                     multiplier = new_cost_by_key[key] / old_fob
-                    changes = _apply_mass_update(product, "fob_cost", multiplier)
+                    changes = _apply_mass_update(product, "fob_cost", multiplier, presets)
                     pgfire.update("products", f"{duration}/{pid}", changes)
                     updated_count += 1
                     cell_types_changed.add(key)
