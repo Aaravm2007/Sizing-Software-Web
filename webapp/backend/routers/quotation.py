@@ -43,17 +43,12 @@ TEMPLATE_MAP = {
 }
 FORMATS = list(TEMPLATE_MAP.keys())
 
-MODULAR_RACKS = {
-    "W=600*D=1000*H=880":  30000,
-    "W=600*D=1000*H=1392": 40000,
-    "W=600*D=1000*H=1882": 49000,
-    "W=600*D=1000*H=1971": 64000,
-    "W=600*D=1000*H=2058": 69000,
-    "W=600*D=800*H=992":   30000,
-    "W=600*D=800*H=1704":  43000,
-    "W=600*D=1000*H=2325": 70000,
-    "W=600*D=1400*H=1882": 70000,
-}
+def _modular_rack_rates() -> dict:
+    from pg import get_conn as _pg_conn
+    with _pg_conn() as con:
+        cur = con.cursor()
+        cur.execute("SELECT key, price FROM modular_rack_rates")
+        return {k: float(p) for k, p in cur.fetchall()}
 
 # ── Pydantic ──────────────────────────────────────────────────────────────────
 
@@ -261,7 +256,7 @@ def list_formats(_=Depends(get_current_user)):
 
 @router.get("/modular-racks")
 def list_racks(_=Depends(get_current_user)):
-    return [{"key": k, "price": v} for k, v in MODULAR_RACKS.items()]
+    return [{"key": k, "price": v} for k, v in _modular_rack_rates().items()]
 
 
 @router.get("/next-code")
@@ -823,7 +818,7 @@ def add_modular(code: str, body: AddModularReq, user=Depends(get_current_user)):
     if body.custom_price > 0:
         price = body.custom_price
     else:
-        price = MODULAR_RACKS.get(body.rack_key)
+        price = _modular_rack_rates().get(body.rack_key)
         if price is None:
             raise HTTPException(400, f"Unknown rack: {body.rack_key}")
 
@@ -980,6 +975,12 @@ def update_item(code: str, sr_no: int, body: UpdateItemReq, user=Depends(get_cur
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
+    try:
+        from inquiry_db import sync_inquiry_for_quote as _sync_inq
+        updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
+        _sync_inq(code, updated)
+    except Exception:
+        pass
     return {"detail": "updated"}
 
 
@@ -993,6 +994,12 @@ def revert_item_discount(code: str, sr_no: int, user=Depends(get_current_user), 
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
+    try:
+        from inquiry_db import sync_inquiry_for_quote as _sync_inq
+        updated = [_row_to_dict(i) for i in get_all_quote_products(code, tdb)]
+        _sync_inq(code, updated)
+    except Exception:
+        pass
     return {"detail": "reverted"}
 
 

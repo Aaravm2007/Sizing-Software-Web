@@ -315,7 +315,13 @@ def sync_inquiry_for_quote(quote_code: str, items: list, db_path=None):
         my_customs = [r for r in custom_items
                       if sys_sr < int(r.get("sr_no", 0)) < next_sys_sr]
 
-        fields: dict = {}
+        sys_qty = int(sys_item.get("quantity", 1) or 1)
+        sys_price = float(sys_item.get("quote_price", 0) or 0)
+        fields: dict = {
+            "qty_system":   str(sys_item.get("quantity", "")),
+            "rate_system":  str(round(sys_price / sys_qty, 2)) if sys_qty else str(sys_price),
+            "price_system": str(sys_price),
+        }
 
         # rack slots (max 2)
         for i, rack in enumerate(my_racks[:2], start=1):

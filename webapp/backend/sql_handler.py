@@ -129,7 +129,7 @@ def fetch_all_projects(db_path=None):
     with get_conn() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT project_name FROM sizing_projects WHERE username = %s ORDER BY id",
+            "SELECT project_name FROM sizing_projects WHERE username = %s ORDER BY id DESC",
             (_user(db_path),),
         )
         return [r[0] for r in cur.fetchall()]
